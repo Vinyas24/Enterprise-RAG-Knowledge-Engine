@@ -1,0 +1,153 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "rag-engine"
+dynamic = ["version"]
+description = "Enterprise RAG knowledge engine: ingestion, hybrid retrieval, re-ranking and grounded, cited answers."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+keywords = ["rag", "retrieval", "fastapi", "pinecone", "postgresql"]
+classifiers = [
+    "Private :: Do Not Upload",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Typing :: Typed",
+]
+dependencies = [
+    "alembic>=1.14,<2.0",
+    "fastapi>=0.115,<1.0",
+    "pypdf>=5.0,<8.0",
+    "python-docx>=1.1,<2.0",
+    "python-multipart>=0.0.20,<1.0",
+    "uvicorn[standard]>=0.30,<1.0",
+    "pydantic>=2.9,<3.0",
+    "pydantic-settings>=2.5,<3.0",
+    "sqlalchemy[asyncio]>=2.0.35,<2.1",
+    "asyncpg>=0.29,<1.0",
+    "httpx>=0.27,<1.0",
+    "pinecone>=5.0.0,<6.0.0",
+]
+
+[project.optional-dependencies]
+# Dev tooling is pinned exactly: lint/format/type-check output is a build
+# artifact, and a formatter upgrade must never turn a green branch red.
+# Runtime dependencies use tested ranges until a lockfile is introduced.
+dev = [
+    "httpx2==2.16.2",
+    "mypy==1.20.2",
+    "pytest==9.2.0",
+    "pytest-asyncio==1.5.0",
+    "pytest-cov==7.1.0",
+    "ruff==0.17.6",
+]
+
+[project.scripts]
+rag-engine = "rag_engine.cli:main"
+
+[tool.hatch.version]
+path = "src/rag_engine/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/rag_engine"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/rag_engine", "tests", "README.md", "pyproject.toml"]
+
+# --------------------------------------------------------------------------
+# Ruff: linter + formatter
+# --------------------------------------------------------------------------
+[tool.ruff]
+src = ["src", "tests"]
+line-length = 100
+target-version = "py311"
+extend-exclude = [".venv", "build", "dist"]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes
+    "W",   # pycodestyle warnings
+    "I",   # import sorting
+    "UP",  # pyupgrade
+    "B",   # bugbear
+    "C4",  # comprehensions
+    "SIM", # simplify
+    "ASYNC", # async correctness
+    "S",   # bandit-style security checks
+    "RUF", # ruff-specific
+]
+ignore = [
+    "S104", # binding to 0.0.0.0 is expected inside a container
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = [
+    "S101", # asserts are the point of tests
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["rag_engine"]
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI dependencies are declared as argument defaults by design; they are
+# evaluated by the framework, not at function definition time.
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Security"]
+
+[tool.ruff.format]
+quote-style = "double"
+line-ending = "lf"
+
+# --------------------------------------------------------------------------
+# mypy
+# --------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.11"
+files = ["src"]
+strict = true
+warn_unreachable = true
+show_error_codes = true
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = ["pinecone", "pinecone.*"]
+ignore_missing_imports = true
+
+# --------------------------------------------------------------------------
+# pytest
+# --------------------------------------------------------------------------
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+addopts = ["-ra", "--strict-config", "--strict-markers"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+filterwarnings = ["error"]
+markers = [
+    "integration: requires a real PostgreSQL instance (set RAG_TEST_DATABASE_URL)",
+]
+
+# --------------------------------------------------------------------------
+# coverage
+# --------------------------------------------------------------------------
+[tool.coverage.run]
+branch = true
+source = ["rag_engine"]
+omit = ["rag_engine/__main__.py"]
+# SQLAlchemy's async layer awaits through greenlets. Without greenlet tracing,
+# every line after the first awaited database call looks unexecuted, which
+# understates coverage of exactly the error paths that matter. Starlette's
+# TestClient also runs the app on a worker thread, so thread tracing stays on.
+concurrency = ["greenlet", "thread"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+]
+fail_under = 90

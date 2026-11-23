@@ -1,0 +1,32 @@
+# --- secrets / environment ------------------------------------------------
+.env
+.env.*
+!.env.example
+
+# --- python ---------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+
+# --- tooling caches -------------------------------------------------------
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# --- editors / OS ---------------------------------------------------------
+.idea/
+.vscode/
+.DS_Store
+
+# --- runtime --------------------------------------------------------------
+*.log
+tmp/

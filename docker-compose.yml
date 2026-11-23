@@ -1,0 +1,164 @@
+name: rag-engine
+
+# Shared by every application container so compose builds the dev image once
+# and all services run identical code.
+x-app-build: &app-build
+  context: .
+  target: dev
+
+x-app-environment: &app-environment
+  RAG_ENVIRONMENT: ${RAG_ENVIRONMENT:-local}
+  RAG_DEBUG: ${RAG_DEBUG:-false}
+  RAG_LOG_LEVEL: ${RAG_LOG_LEVEL:-INFO}
+  RAG_LOG_FORMAT: ${RAG_LOG_FORMAT:-console}
+  # The container always talks to the `postgres` service on its internal port;
+  # RAG_DATABASE_URL from `.env` is intentionally not used here.
+  RAG_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-rag}:${POSTGRES_PASSWORD:-rag_dev_password}@postgres:5432/${POSTGRES_DB:-rag}
+  # Only read by pytest (docker compose exec api pytest); the app ignores it.
+  # The initdb script creates this database alongside the application one.
+  RAG_TEST_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-rag}:${POSTGRES_PASSWORD:-rag_dev_password}@postgres:5432/rag_test
+  RAG_HEALTH_CHECK_TIMEOUT_SECONDS: ${RAG_HEALTH_CHECK_TIMEOUT_SECONDS:-2}
+  RAG_BLOB_STORE_PATH: /data/uploads
+  RAG_UPLOAD_MAX_BYTES: ${RAG_UPLOAD_MAX_BYTES:-26214400}
+  RAG_CHUNK_SIZE_CHARS: ${RAG_CHUNK_SIZE_CHARS:-1200}
+  RAG_CHUNK_OVERLAP_CHARS: ${RAG_CHUNK_OVERLAP_CHARS:-200}
+  RAG_CHUNK_STRATEGY: ${RAG_CHUNK_STRATEGY:-recursive}
+  RAG_WORKER_POLL_INTERVAL_SECONDS: ${RAG_WORKER_POLL_INTERVAL_SECONDS:-0.5}
+  RAG_WORKER_MAX_ATTEMPTS: ${RAG_WORKER_MAX_ATTEMPTS:-3}
+  RAG_WORKER_RETRY_BASE_SECONDS: ${RAG_WORKER_RETRY_BASE_SECONDS:-2}
+  RAG_WORKER_RETRY_MAX_SECONDS: ${RAG_WORKER_RETRY_MAX_SECONDS:-60}
+  RAG_WORKER_VISIBILITY_TIMEOUT_SECONDS: ${RAG_WORKER_VISIBILITY_TIMEOUT_SECONDS:-300}
+  RAG_EMBEDDING_PROVIDER: ${RAG_EMBEDDING_PROVIDER:-deterministic}
+  RAG_EMBEDDING_MODEL: ${RAG_EMBEDDING_MODEL:-text-embedding-3-small}
+  RAG_EMBEDDING_DIMENSIONS: ${RAG_EMBEDDING_DIMENSIONS:-256}
+  RAG_EMBEDDING_API_KEY: ${RAG_EMBEDDING_API_KEY:-}
+  RAG_EMBEDDING_API_BASE: ${RAG_EMBEDDING_API_BASE:-https://api.openai.com/v1}
+  RAG_VECTOR_STORE: ${RAG_VECTOR_STORE:-pinecone}
+  RAG_PINECONE_API_KEY: ${RAG_PINECONE_API_KEY:-pcsk-local}
+  RAG_PINECONE_INDEX_NAME: ${RAG_PINECONE_INDEX_NAME:-rag-engine}
+  RAG_PINECONE_CONTROL_HOST: ${RAG_PINECONE_CONTROL_HOST:-http://pinecone:5080}
+  RAG_PINECONE_INDEX_HOST: ${RAG_PINECONE_INDEX_HOST:-}
+  RAG_RETRIEVAL_TOP_K: ${RAG_RETRIEVAL_TOP_K:-5}
+  RAG_RETRIEVAL_MIN_SCORE: ${RAG_RETRIEVAL_MIN_SCORE:-0.0}
+  RAG_LLM_PROVIDER: ${RAG_LLM_PROVIDER:-deterministic}
+  RAG_LLM_MODEL: ${RAG_LLM_MODEL:-gpt-4o-mini}
+  RAG_LLM_API_KEY: ${RAG_LLM_API_KEY:-}
+  RAG_LLM_API_BASE: ${RAG_LLM_API_BASE:-https://api.openai.com/v1}
+  RAG_LLM_TEMPERATURE: ${RAG_LLM_TEMPERATURE:-0.0}
+
+x-app-volumes: &app-volumes
+  # Editable install (PEP 660 .pth) points at /app/src, so host edits are
+  # live-reloaded without rebuilding the image.
+  - ./src:/app/src
+  - ./tests:/app/tests
+  - ./alembic:/app/alembic
+  - ./alembic.ini:/app/alembic.ini
+  # Shared between the API (writer) and the worker (reader).
+  - uploads:/data/uploads
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-rag}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-rag_dev_password}
+      POSTGRES_DB: ${POSTGRES_DB:-rag}
+    ports:
+      # Exposed so the API can also be run from the host, and so tests can
+      # reach the database directly. Not intended for public networks.
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # Runs only when the volume is initialised: creates the isolated test DB.
+      - ./docker/initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+    restart: unless-stopped
+
+  # One-shot migration runner. The API and worker start only after it succeeds,
+  # so no service ever serves traffic against a stale schema.
+  migrate:
+    build: *app-build
+    image: rag-engine-dev
+    command: ["alembic", "upgrade", "head"]
+    environment: *app-environment
+    volumes: *app-volumes
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # One-shot process; the image healthcheck probes the API port.
+    healthcheck:
+      disable: true
+    restart: "no"
+
+  pinecone:
+    image: ghcr.io/pinecone-io/pinecone-local:latest
+    ports:
+      - "5080:5080"
+      - "5081:5081"
+      - "5082:5082"
+    restart: unless-stopped
+    networks:
+      default:
+        aliases:
+          - pinecone
+          - pinecone-phase3-test
+
+  api:
+    build: *app-build
+    image: rag-engine-dev
+    command:
+      - uvicorn
+      - rag_engine.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --reload
+      - --no-access-log
+    environment: *app-environment
+    ports:
+      - "${API_PORT:-8000}:8000"
+    volumes: *app-volumes
+    depends_on:
+      postgres:
+        condition: service_healthy
+      pinecone:
+        condition: service_started
+      migrate:
+        condition: service_completed_successfully
+    init: true
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  worker:
+    build: *app-build
+    image: rag-engine-dev
+    command: ["python", "-m", "rag_engine.ingestion.worker"]
+    environment: *app-environment
+    volumes: *app-volumes
+    depends_on:
+      postgres:
+        condition: service_healthy
+      pinecone:
+        condition: service_started
+      migrate:
+        condition: service_completed_successfully
+    init: true
+    # The worker serves no HTTP; the image healthcheck would always fail.
+    healthcheck:
+      disable: true
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  uploads:
