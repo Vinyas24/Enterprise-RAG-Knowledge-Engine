@@ -19,7 +19,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 from urllib.parse import urlsplit
 
-from pinecone import Pinecone, ServerlessSpec  # type: ignore[import-untyped]
+from pinecone import Pinecone, ServerlessSpec
 
 from .base import Metadata, VectorMatch, VectorRecord
 from .errors import VectorStoreConfigurationError, VectorStoreError, VectorStoreUnavailable

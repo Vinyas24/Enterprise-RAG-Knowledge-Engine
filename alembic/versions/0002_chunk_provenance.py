@@ -72,8 +72,7 @@ def upgrade() -> None:
     op.create_check_constraint(
         "char_range",
         "chunks",
-        "start_char IS NULL OR end_char IS NULL "
-        "OR (start_char >= 0 AND end_char > start_char)",
+        "start_char IS NULL OR end_char IS NULL OR (start_char >= 0 AND end_char > start_char)",
     )
 
 
