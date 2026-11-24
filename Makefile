@@ -4,7 +4,7 @@
 
 PYTHON ?= python3
 
-.PHONY: help install up down logs ps test test-unit test-integration lint fmt typecheck check migrate
+.PHONY: help install up down logs ps test test-unit test-integration eval lint fmt typecheck check migrate
 
 help: ## Show available targets
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
@@ -32,6 +32,12 @@ test-unit: ## Run hermetic unit tests only (no coverage gate)
 
 test-integration: ## Run integration tests (requires RAG_TEST_DATABASE_URL)
 	$(PYTHON) -m pytest -m integration
+
+eval: ## Run the retrieval evaluation and compare with the saved baseline
+	$(PYTHON) -m rag_engine.cli evaluate \
+		--dataset eval/datasets/enterprise_baseline.json \
+		$(if $(wildcard eval/baselines/dense_baseline.json),--baseline eval/baselines/dense_baseline.json,) \
+		$(EVAL_ARGS)
 
 lint: ## Lint and check formatting
 	$(PYTHON) -m ruff check .

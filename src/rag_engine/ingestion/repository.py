@@ -286,24 +286,21 @@ async def fail_abandoned_jobs(session: AsyncSession, *, visibility_timeout_secon
     return len(document_ids)
 
 
-async def complete_job(
+async def replace_chunks(
     session: AsyncSession,
     *,
-    job_id: UUID,
     document_id: UUID,
     tenant_id: UUID,
     drafts: Sequence[ChunkDraft],
     access_level: AccessLevel,
 ) -> list[tuple[UUID, str]]:
-    """Replace the document's chunks and mark both document and job successful.
+    """Replace a document's chunk rows with ``drafts``.
 
-    Returns a list of ``(chunk_uuid, vector_id)`` pairs for every chunk, so the
-    caller can upsert vectors using the same deterministic ids that PostgreSQL
-    stores.
+    Returns ``(chunk_uuid, vector_id)`` pairs so callers can upsert vectors
+    with the same deterministic ids PostgreSQL stores. The caller owns the
+    transaction and decides whether the document is marked indexed.
     """
     now = utcnow()
-
-    # Re-ingestion (retry or reprocess) must not leave stale chunks behind.
     await session.execute(delete(Chunk).where(Chunk.document_id == document_id))
 
     id_pairs: list[tuple[UUID, str]] = []
@@ -335,9 +332,34 @@ async def complete_job(
     await session.execute(
         update(Document)
         .where(Document.id == document_id)
+        .values(chunk_count=len(drafts), updated_at=now)
+    )
+    return id_pairs
+
+
+async def complete_job(
+    session: AsyncSession,
+    *,
+    job_id: UUID,
+    document_id: UUID,
+    tenant_id: UUID,
+    drafts: Sequence[ChunkDraft],
+    access_level: AccessLevel,
+) -> list[tuple[UUID, str]]:
+    """Replace the document's chunks and mark both document and job successful."""
+    id_pairs = await replace_chunks(
+        session,
+        document_id=document_id,
+        tenant_id=tenant_id,
+        drafts=drafts,
+        access_level=access_level,
+    )
+    now = utcnow()
+    await session.execute(
+        update(Document)
+        .where(Document.id == document_id)
         .values(
             status=DocumentStatus.INDEXED,
-            chunk_count=len(drafts),
             updated_at=now,
         )
     )

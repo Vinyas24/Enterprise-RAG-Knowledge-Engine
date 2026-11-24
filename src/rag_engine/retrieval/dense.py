@@ -129,6 +129,16 @@ class DenseRetriever(Retriever):
                 )
             )
 
-        # Sort descending by score
-        retrieved.sort(key=lambda item: (-item.score, item.chunk_index))
+        # Sort descending by score. Vector stores may return equal scores in
+        # arbitrary order, and chunk_index alone is not enough because several
+        # documents can contribute chunk 0. Title and content are stable across
+        # runs, so ties do not make citations or evaluation metrics drift.
+        retrieved.sort(
+            key=lambda item: (
+                -item.score,
+                item.document_title,
+                item.chunk_index,
+                item.content,
+            )
+        )
         return retrieved[:top_k]

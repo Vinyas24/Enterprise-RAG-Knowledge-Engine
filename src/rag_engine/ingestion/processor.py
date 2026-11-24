@@ -30,7 +30,6 @@ from uuid import UUID
 from rag_engine.core.config import Settings
 from rag_engine.core.db import DatabaseProtocol
 from rag_engine.core.enums import AccessLevel
-from rag_engine.core.ids import chunk_vector_id
 from rag_engine.core.models import Document
 from rag_engine.embedding import Embedder
 from rag_engine.ingestion import repository
@@ -38,7 +37,8 @@ from rag_engine.ingestion.blobstore import BlobStore, verify_content
 from rag_engine.ingestion.chunking import ChunkDraft, ChunkingStrategy
 from rag_engine.ingestion.errors import IngestionError
 from rag_engine.ingestion.parsers import ParserRegistry
-from rag_engine.vectorstore import VectorRecord, VectorStore, metadata_for_vector
+from rag_engine.ingestion.vectorize import build_vector_records
+from rag_engine.vectorstore import VectorStore
 from rag_engine.vectorstore.maintenance import delete_stale_vectors
 
 logger = logging.getLogger(__name__)
@@ -124,7 +124,14 @@ class IngestionProcessor:
                     session, document_id=job.document_id
                 )
 
-            records = self._vector_records(job.document_id, job.tenant_id, extraction)
+            records = build_vector_records(
+                document_id=job.document_id,
+                tenant_id=job.tenant_id,
+                drafts=extraction.drafts,
+                vectors=extraction.vectors,
+                access_level=extraction.access_level,
+                dimensions=self._embedder.dimensions,
+            )
             new_vector_ids = [record.id for record in records]
 
             # Vectors first: a document is never marked indexed without them.
@@ -208,46 +215,6 @@ class IngestionProcessor:
         vectors = await self._embedder.embed(texts)
 
         return Extraction(drafts=drafts, access_level=access_level, vectors=vectors)
-
-    def _vector_records(
-        self, document_id: UUID, tenant_id: UUID, extraction: Extraction
-    ) -> list[VectorRecord]:
-        """Pair each draft with its embedding and the metadata retrieval needs."""
-        if len(extraction.vectors) != len(extraction.drafts):
-            raise IngestionError(
-                f"embedder returned {len(extraction.vectors)} vectors for "
-                f"{len(extraction.drafts)} chunks"
-            )
-
-        records: list[VectorRecord] = []
-        for index, (draft, vector) in enumerate(
-            zip(extraction.drafts, extraction.vectors, strict=True)
-        ):
-            if len(vector) != self._embedder.dimensions:
-                raise IngestionError(
-                    f"embedding {index} has {len(vector)} dimensions, "
-                    f"expected {self._embedder.dimensions}"
-                )
-            records.append(
-                VectorRecord(
-                    id=chunk_vector_id(document_id, index),
-                    values=vector,
-                    metadata=metadata_for_vector(
-                        {
-                            "document_id": str(document_id),
-                            "tenant_id": str(tenant_id),
-                            "chunk_index": index,
-                            "access_level": str(extraction.access_level),
-                            "page_start": draft.page_start,
-                            "page_end": draft.page_end,
-                            "section_path": draft.section_path,
-                            "start_char": draft.start_char,
-                            "end_char": draft.end_char,
-                        }
-                    ),
-                )
-            )
-        return records
 
     async def aclose(self) -> None:
         """Release embedding and vector-store clients on worker shutdown.

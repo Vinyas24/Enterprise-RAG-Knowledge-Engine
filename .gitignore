@@ -30,3 +30,6 @@ htmlcov/
 # --- runtime --------------------------------------------------------------
 *.log
 tmp/
+
+# --- generated evaluation reports (committed baselines live in eval/baselines) ---
+eval/reports/

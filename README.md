@@ -5,13 +5,15 @@ organization's documents, search them with hybrid retrieval, and answer
 questions with grounded, cited responses — while enforcing tenant and access
 control at retrieval time.
 
-> **Status: Phase 4 — retrieval and grounded generation.**
+> **Status: Phase 5 — evaluation harness.**
 > Documents are uploaded, parsed, chunked, embedded and indexed asynchronously;
 > chunks are searchable by meaning, isolated per tenant and filtered by access
 > clearance. `POST /query` returns an answer grounded in retrieved chunks with
 > verifiable citations. Reindexing and deletion keep PostgreSQL and the vector
-> store consistent, including on failure. Guardrails and the evaluation harness
-> land in later phases.
+> store consistent, including on failure. A labeled retrieval benchmark now
+> measures recall, MRR, precision, irrelevant context and latency against a
+> saved dense-only baseline, so later retrieval changes are proven rather than
+> assumed. Guardrails land in the next phase.
 
 ---
 
@@ -82,7 +84,11 @@ src/rag_engine/
 ├── vectorstore/    store interface, memory + Pinecone, stale-vector cleanup
 ├── retrieval/      dense retrieval with tenant and clearance filtering
 ├── generation/     prompt assembly, LLM providers, citation mapping
-└── guardrails/     input checks, grounding, access control   (Phase 5+)
+├── evaluation/     dataset loader, metrics, isolated harness, CLI report
+└── guardrails/     input checks, grounding, access control   (Phase 6+)
+eval/
+├── datasets/       committed corpus and labeled questions
+└── baselines/      saved reports used for comparison
 tests/
 ├── unit/           hermetic: no database, no network
 └── integration/    real PostgreSQL via RAG_TEST_DATABASE_URL
@@ -394,16 +400,123 @@ curl -X POST http://localhost:8000/query \
 ### Phase 4 trade-offs
 
 - **Dense retrieval only.** BM25/hybrid fusion and a cross-encoder re-ranker
-  are deliberately deferred; they need an evaluation set to prove they help
-  rather than just add latency.
+  are deliberately deferred. The Phase 5 benchmark now exists so each can be
+  judged on measured quality and latency instead of intuition.
 - **Single-shot generation.** No query rewriting, multi-hop or agent loop yet.
   One retrieval pass keeps latency and failure modes predictable.
 - **Clearance is supplied by the caller.** Authentication is not implemented;
   the header-driven tenant and clearance model is the seam where real identity
-  will plug in during Phase 5.
+  will plug in during Phase 6.
 - **Citations are only as good as chunking.** The chunk span and section path
   make an answer auditable, but a chunk that mixes ideas will produce a vague
   citation. That is why chunking quality was treated as a first-class phase.
+
+---
+
+## Evaluation harness (Phase 5)
+
+Goal: make retrieval quality measurable before changing retrieval. Every later
+experiment (hybrid search, re-ranking, a different chunk size) is compared with
+the same dataset, the same metric definitions and a saved baseline.
+
+**Dataset.** `eval/datasets/enterprise_baseline.json` contains 10 enterprise
+documents and 42 labeled questions. Each question lists its
+`relevant_documents`, not chunk ids. Document-level labels are deliberately
+coarser than chunk-level labels: they stay valid when chunking changes, so a
+chunking experiment can be compared on identical ground truth. The manifest
+supports inline content or a `path` relative to the manifest; the committed
+corpus uses readable Markdown files in a sibling directory.
+
+**One command.** The committed baseline was recorded with deterministic
+embeddings, 256 dimensions, the in-memory store, default chunking
+(1200 / 200 characters), `top_k=5` and `min_score=0.0`:
+
+```bash
+RAG_DATABASE_URL=postgresql+asyncpg://rag:rag_dev_password@localhost:55432/rag \
+RAG_VECTOR_STORE=memory RAG_EMBEDDING_PROVIDER=deterministic \
+RAG_EMBEDDING_DIMENSIONS=256 make eval
+```
+
+`make eval` prints the Markdown report and automatically compares against
+`eval/baselines/dense_baseline.json` when it exists. Pass extra flags through
+`EVAL_ARGS`, for example:
+
+```bash
+make eval EVAL_ARGS="--json-output eval/reports/current.json \
+  --save-baseline eval/baselines/dense_baseline.json"
+```
+
+The CLI also accepts `--dataset`, `--top-k`, `--min-score`, `--baseline` and
+`--markdown-output`. Evaluation needs only PostgreSQL and the configured
+vector store; it does not need the API or worker to be running.
+
+**Dense-only baseline** (`eval/baselines/dense_baseline.json`):
+
+| Metric | Value |
+| --- | ---: |
+| Recall@5 | 0.9524 |
+| Precision@5 | 0.2619 |
+| MRR | 0.6865 |
+| Hit rate | 0.9524 |
+| Irrelevant-context rate | 0.7381 |
+| Latency p50 | 8.18 ms |
+| Latency p95 | 14.04 ms |
+
+Latency is hardware-dependent; the quality metrics are reproducible with the
+deterministic embedder. The baseline is a regression anchor for this project,
+not a claim about production semantic quality.
+
+**Metric definitions.** A retrieved chunk is relevant when its document key is
+in the question's `relevant_documents`.
+
+- **Recall@k**: unique expected documents found in the top k chunks divided by
+  the number of expected documents, averaged over questions.
+- **Precision@k**: relevant chunks in the top k divided by k, averaged over
+  questions. Fewer than k results are not rounded up.
+- **MRR**: reciprocal rank of the first relevant chunk (`0` when none),
+  averaged over questions.
+- **Hit rate**: share of questions with at least one relevant chunk.
+- **Irrelevant-context rate**: irrelevant retrieved chunks divided by all
+  retrieved chunks, micro-averaged across questions. This is the share of the
+  generator's context that the labels do not consider relevant.
+- **Latency**: wall time around `Retriever.retrieve` only — query embedding,
+  vector search, PostgreSQL hydration and clearance filtering — after one
+  untimed warm-up. It excludes ingestion, dataset loading, metric calculation,
+  report rendering and process startup. p50/p95 use the nearest-rank method.
+
+**Isolation and repeatability.** Each run creates a throwaway tenant and blob
+directory, indexes the corpus with the production chunker, embedder, ids and
+vector metadata, and deletes the tenant and vectors afterwards even when a
+question fails. Indexing is done directly rather than through the job queue, so
+a worker running against the same database cannot claim evaluation jobs and
+silently change the corpus. Chunking, embedding and vector construction still
+come from the production modules. Retrieval breaks equal scores by document
+title, chunk index and content, so a backend's arbitrary tie order cannot make
+the quality metrics drift between runs.
+
+**Staleness is explicit.** The report stores a dataset fingerprint and the
+retrieval configuration. Comparing against a baseline with a different
+fingerprint or configuration still works, but the report warns that the deltas
+include corpus or configuration changes, not only retrieval changes.
+
+### Phase 5 trade-offs
+
+- **Document-level labels lose chunk-level nuance.** They cannot tell whether
+  the best passage or a marginal passage from the right document was retrieved.
+  The benefit is that labels survive chunking changes; chunk-level labels would
+  need relabeling on every chunking experiment.
+- **Precision@5 looks low by construction.** Most questions have one expected
+  document and k=5, so at most one fifth of the returned chunks can be relevant
+  when each document contributes one chunk. The metric is still useful for
+  comparing runs; the irrelevant-context rate makes the prompt-level cost
+  visible.
+- **The deterministic embedder is not production quality.** It is a stable,
+  offline feature hasher, which keeps the baseline reproducible and CI
+  hermetic. Two customer-FAQ questions already miss under it; that is a useful
+  floor, not evidence that the production model will behave the same way.
+- **Ingestion is excluded from latency on purpose.** The metric answers "how
+  long does a query wait for context?", not "how fast can the worker index a
+  document?". Keeping both in one number would make neither actionable.
 
 ---
 
@@ -458,6 +571,7 @@ curl -X POST http://localhost:8000/query \
 make test-unit          # hermetic unit tests only
 make lint               # ruff check + format check
 make typecheck          # mypy (strict)
+make eval               # retrieval metrics vs. the saved dense baseline
 
 # Full suite + coverage gate; integration tests need a real PostgreSQL:
 export RAG_TEST_DATABASE_URL=postgresql+asyncpg://rag:rag_dev_password@localhost:55432/rag_test
@@ -493,5 +607,6 @@ make test
 | 2 | Chunking: boundary-aware splits, source offsets, access metadata, inspection ✅ |
 | 3 | Embeddings + Pinecone, tenant namespaces, consistent reindex/delete ✅ |
 | 4 | Dense retrieval with clearance filters, grounded generation, citations ✅ |
-| 5 | Guardrails and access-control enforcement |
-| 6 | Evaluation harness, latency and irrelevant-context measurements |
+| 5 | Evaluation harness: labeled corpus, recall/MRR/precision, latency, saved dense baseline ✅ |
+| 6 | Guardrails and access-control enforcement |
+| 7 | Hybrid retrieval and re-ranking, measured against the Phase 5 baseline |

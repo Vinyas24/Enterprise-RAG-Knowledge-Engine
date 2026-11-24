@@ -138,6 +138,51 @@ async def test_dense_retriever_min_score_and_clearance_filtering() -> None:
     assert chunk.section_path == "Intro"
 
 
+async def test_equal_scores_are_ordered_by_stable_document_fields() -> None:
+    tenant_id = uuid4()
+    first_doc = uuid4()
+    second_doc = uuid4()
+
+    embedder = AsyncMock()
+    embedder.embed.return_value = [[0.1, 0.2]]
+    matches = [
+        VectorMatch(id=chunk_vector_id(first_doc, 0), score=0.5),
+        VectorMatch(id=chunk_vector_id(second_doc, 0), score=0.5),
+    ]
+    vector_store = AsyncMock()
+    vector_store.query.return_value = matches
+
+    zulu = Chunk(
+        id=uuid4(),
+        document_id=first_doc,
+        tenant_id=tenant_id,
+        chunk_index=0,
+        content="Zulu content",
+        char_count=12,
+        access_level=AccessLevel.INTERNAL,
+    )
+    alpha = Chunk(
+        id=uuid4(),
+        document_id=second_doc,
+        tenant_id=tenant_id,
+        chunk_index=0,
+        content="Alpha content",
+        char_count=13,
+        access_level=AccessLevel.INTERNAL,
+    )
+    # PostgreSQL row order is not guaranteed, so return the losing order.
+    db = MockDatabase([(zulu, "Zulu Handbook"), (alpha, "Alpha Handbook")])
+
+    results = await DenseRetriever(
+        embedder=embedder, vector_store=vector_store, database=db
+    ).retrieve(tenant_id=tenant_id, query="query", top_k=2)
+
+    assert [chunk.document_title for chunk in results] == [
+        "Alpha Handbook",
+        "Zulu Handbook",
+    ]
+
+
 def test_build_retriever() -> None:
     settings = Settings()
     retriever = build_retriever(

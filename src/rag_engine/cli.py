@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 from collections.abc import Sequence
+from pathlib import Path
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -19,6 +20,7 @@ from rag_engine.core.config import get_settings
 from rag_engine.core.db import PostgresDatabase
 from rag_engine.core.logging import configure_logging
 from rag_engine.core.models import Tenant
+from rag_engine.evaluation.cli import run_command as run_evaluation_command
 from rag_engine.ingestion import repository
 
 
@@ -68,12 +70,44 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     subparsers.add_parser("list-tenants", help="list tenants")
 
+    evaluate = subparsers.add_parser("evaluate", help="run the retrieval evaluation harness")
+    evaluate.add_argument(
+        "--dataset",
+        type=Path,
+        default=Path("eval/datasets/enterprise_baseline.json"),
+        help="dataset manifest (default: %(default)s)",
+    )
+    evaluate.add_argument("--top-k", type=int, default=None, help="override retrieval top_k")
+    evaluate.add_argument(
+        "--min-score", type=float, default=None, help="override the retrieval score floor"
+    )
+    evaluate.add_argument(
+        "--baseline",
+        type=Path,
+        default=None,
+        help="previous report JSON to compare against",
+    )
+    evaluate.add_argument(
+        "--save-baseline",
+        type=Path,
+        default=None,
+        help="write this report as a new baseline JSON",
+    )
+    evaluate.add_argument(
+        "--json-output", type=Path, default=None, help="write the full report as JSON"
+    )
+    evaluate.add_argument(
+        "--markdown-output", type=Path, default=None, help="write the rendered report as Markdown"
+    )
+
     args = parser.parse_args(argv)
     settings = get_settings()
     configure_logging(level=settings.log_level, log_format=settings.log_format.value)
 
     if args.command == "create-tenant":
         return asyncio.run(_create_tenant(args.slug, args.name))
+    if args.command == "evaluate":
+        return run_evaluation_command(args, settings)
     return asyncio.run(_list_tenants())
 
 

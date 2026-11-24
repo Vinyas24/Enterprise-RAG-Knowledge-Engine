@@ -1,0 +1,373 @@
+{
+  "name": "enterprise-baseline",
+  "version": 1,
+  "description": "A small enterprise knowledge base with document-level relevance labels. Used as the Phase 5 dense-only baseline; questions are answered by exactly one document unless stated otherwise.",
+  "documents": [
+    {
+      "key": "deployment-runbook",
+      "title": "Deployment Runbook",
+      "filename": "deployment-runbook.md",
+      "path": "enterprise_baseline/documents/deployment-runbook.md",
+      "access_level": "internal"
+    },
+    {
+      "key": "security-policy",
+      "title": "Security Policy",
+      "filename": "security-policy.md",
+      "path": "enterprise_baseline/documents/security-policy.md",
+      "access_level": "internal"
+    },
+    {
+      "key": "onboarding-guide",
+      "title": "Onboarding Guide",
+      "filename": "onboarding-guide.md",
+      "path": "enterprise_baseline/documents/onboarding-guide.md",
+      "access_level": "internal"
+    },
+    {
+      "key": "api-reference",
+      "title": "API Reference",
+      "filename": "api-reference.md",
+      "path": "enterprise_baseline/documents/api-reference.md",
+      "access_level": "internal"
+    },
+    {
+      "key": "data-retention-policy",
+      "title": "Data Retention Policy",
+      "filename": "data-retention-policy.md",
+      "path": "enterprise_baseline/documents/data-retention-policy.md",
+      "access_level": "internal"
+    },
+    {
+      "key": "support-escalation",
+      "title": "Support Escalation",
+      "filename": "support-escalation.md",
+      "path": "enterprise_baseline/documents/support-escalation.md",
+      "access_level": "internal"
+    },
+    {
+      "key": "expense-policy",
+      "title": "Expense Policy",
+      "filename": "expense-policy.md",
+      "path": "enterprise_baseline/documents/expense-policy.md",
+      "access_level": "internal"
+    },
+    {
+      "key": "architecture-overview",
+      "title": "Architecture Overview",
+      "filename": "architecture-overview.md",
+      "path": "enterprise_baseline/documents/architecture-overview.md",
+      "access_level": "internal"
+    },
+    {
+      "key": "release-process",
+      "title": "Release Process",
+      "filename": "release-process.md",
+      "path": "enterprise_baseline/documents/release-process.md",
+      "access_level": "internal"
+    },
+    {
+      "key": "customer-faq",
+      "title": "Customer FAQ",
+      "filename": "customer-faq.md",
+      "path": "enterprise_baseline/documents/customer-faq.md",
+      "access_level": "internal"
+    }
+  ],
+  "questions": [
+    {
+      "id": "deploy-01",
+      "question": "How do I roll back a failed Kubernetes deployment?",
+      "relevant_documents": [
+        "deployment-runbook"
+      ]
+    },
+    {
+      "id": "deploy-02",
+      "question": "What percentage of traffic goes to the canary pool?",
+      "relevant_documents": [
+        "deployment-runbook"
+      ]
+    },
+    {
+      "id": "deploy-03",
+      "question": "Which metrics trigger an automatic rollback?",
+      "relevant_documents": [
+        "deployment-runbook"
+      ]
+    },
+    {
+      "id": "deploy-04",
+      "question": "Which command checks pod health after a deploy?",
+      "relevant_documents": [
+        "deployment-runbook"
+      ]
+    },
+    {
+      "id": "deploy-05",
+      "question": "How long is the rollback window after full rollout?",
+      "relevant_documents": [
+        "deployment-runbook"
+      ]
+    },
+    {
+      "id": "security-01",
+      "question": "How often must employees rotate their passwords?",
+      "relevant_documents": [
+        "security-policy"
+      ]
+    },
+    {
+      "id": "security-02",
+      "question": "What should I do if my laptop is lost or stolen?",
+      "relevant_documents": [
+        "security-policy"
+      ]
+    },
+    {
+      "id": "security-03",
+      "question": "Which encryption standard protects data at rest?",
+      "relevant_documents": [
+        "security-policy"
+      ]
+    },
+    {
+      "id": "security-04",
+      "question": "Are hardware security keys required for production access?",
+      "relevant_documents": [
+        "security-policy"
+      ]
+    },
+    {
+      "id": "onboarding-01",
+      "question": "What should a new hire do on their first day?",
+      "relevant_documents": [
+        "onboarding-guide"
+      ]
+    },
+    {
+      "id": "onboarding-02",
+      "question": "Who is assigned as a buddy during onboarding?",
+      "relevant_documents": [
+        "onboarding-guide"
+      ]
+    },
+    {
+      "id": "onboarding-03",
+      "question": "Which accounts are provisioned before the start date?",
+      "relevant_documents": [
+        "onboarding-guide"
+      ]
+    },
+    {
+      "id": "onboarding-04",
+      "question": "What equipment is shipped to remote employees?",
+      "relevant_documents": [
+        "onboarding-guide"
+      ]
+    },
+    {
+      "id": "api-01",
+      "question": "How does API authentication work for service clients?",
+      "relevant_documents": [
+        "api-reference"
+      ]
+    },
+    {
+      "id": "api-02",
+      "question": "What is the maximum page size for list endpoints?",
+      "relevant_documents": [
+        "api-reference"
+      ]
+    },
+    {
+      "id": "api-03",
+      "question": "Which status code indicates rate limiting?",
+      "relevant_documents": [
+        "api-reference"
+      ]
+    },
+    {
+      "id": "api-04",
+      "question": "What happens when an API client exceeds its quota?",
+      "relevant_documents": [
+        "api-reference"
+      ]
+    },
+    {
+      "id": "retention-01",
+      "question": "How long are deleted customer records retained in backups?",
+      "relevant_documents": [
+        "data-retention-policy"
+      ]
+    },
+    {
+      "id": "retention-02",
+      "question": "What happens when a customer requests erasure of their data?",
+      "relevant_documents": [
+        "data-retention-policy"
+      ]
+    },
+    {
+      "id": "retention-03",
+      "question": "How long are audit logs kept?",
+      "relevant_documents": [
+        "data-retention-policy"
+      ]
+    },
+    {
+      "id": "retention-04",
+      "question": "How often are backups restored for verification?",
+      "relevant_documents": [
+        "data-retention-policy"
+      ]
+    },
+    {
+      "id": "support-01",
+      "question": "What response time is promised for a severity one incident?",
+      "relevant_documents": [
+        "support-escalation"
+      ]
+    },
+    {
+      "id": "support-02",
+      "question": "When should an engineer escalate to the on-call manager?",
+      "relevant_documents": [
+        "support-escalation"
+      ]
+    },
+    {
+      "id": "support-03",
+      "question": "How often are customer status updates posted during an incident?",
+      "relevant_documents": [
+        "support-escalation"
+      ]
+    },
+    {
+      "id": "support-04",
+      "question": "When is a postmortem required after an incident?",
+      "relevant_documents": [
+        "support-escalation"
+      ]
+    },
+    {
+      "id": "expense-01",
+      "question": "What is the deadline for submitting travel receipts?",
+      "relevant_documents": [
+        "expense-policy"
+      ]
+    },
+    {
+      "id": "expense-02",
+      "question": "What is the hotel cap per night?",
+      "relevant_documents": [
+        "expense-policy"
+      ]
+    },
+    {
+      "id": "expense-03",
+      "question": "Who approves expenses above one thousand dollars?",
+      "relevant_documents": [
+        "expense-policy"
+      ]
+    },
+    {
+      "id": "expense-04",
+      "question": "What is the daily meal per diem?",
+      "relevant_documents": [
+        "expense-policy"
+      ]
+    },
+    {
+      "id": "architecture-01",
+      "question": "How do ingestion workers claim asynchronous jobs?",
+      "relevant_documents": [
+        "architecture-overview"
+      ]
+    },
+    {
+      "id": "architecture-02",
+      "question": "Which database stores document metadata and chunk text?",
+      "relevant_documents": [
+        "architecture-overview"
+      ]
+    },
+    {
+      "id": "architecture-03",
+      "question": "Where is the Redis cache used in the request path?",
+      "relevant_documents": [
+        "architecture-overview"
+      ]
+    },
+    {
+      "id": "architecture-04",
+      "question": "What does the readiness check verify?",
+      "relevant_documents": [
+        "architecture-overview"
+      ]
+    },
+    {
+      "id": "release-01",
+      "question": "What must be included in every changelog entry?",
+      "relevant_documents": [
+        "release-process"
+      ]
+    },
+    {
+      "id": "release-02",
+      "question": "When are feature flags removed?",
+      "relevant_documents": [
+        "release-process"
+      ]
+    },
+    {
+      "id": "release-03",
+      "question": "Which tests must a release candidate pass?",
+      "relevant_documents": [
+        "release-process"
+      ]
+    },
+    {
+      "id": "release-04",
+      "question": "How is the release candidate approved for production?",
+      "relevant_documents": [
+        "release-process"
+      ]
+    },
+    {
+      "id": "faq-01",
+      "question": "How does annual billing compare to monthly pricing?",
+      "relevant_documents": [
+        "customer-faq"
+      ]
+    },
+    {
+      "id": "faq-02",
+      "question": "How can a customer cancel their subscription?",
+      "relevant_documents": [
+        "customer-faq"
+      ]
+    },
+    {
+      "id": "faq-03",
+      "question": "How do customers export their data?",
+      "relevant_documents": [
+        "customer-faq"
+      ]
+    },
+    {
+      "id": "faq-04",
+      "question": "How long does a customer have to dispute an invoice?",
+      "relevant_documents": [
+        "customer-faq"
+      ]
+    },
+    {
+      "id": "faq-05",
+      "question": "How long is data available for export after cancellation?",
+      "relevant_documents": [
+        "customer-faq"
+      ]
+    }
+  ]
+}
