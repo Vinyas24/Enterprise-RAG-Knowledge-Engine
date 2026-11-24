@@ -10,7 +10,7 @@ from pydantic import SecretStr
 
 from rag_engine.core.config import Settings
 from rag_engine.core.ids import chunk_vector_id
-from rag_engine.vectorstore.base import VectorRecord
+from rag_engine.vectorstore.base import VectorRecord, metadata_for_vector
 from rag_engine.vectorstore.errors import VectorStoreConfigurationError
 from rag_engine.vectorstore.factory import build_vector_store
 from rag_engine.vectorstore.maintenance import (
@@ -19,10 +19,7 @@ from rag_engine.vectorstore.maintenance import (
     delete_vectors,
 )
 from rag_engine.vectorstore.memory import MemoryVectorStore
-from rag_engine.vectorstore.pinecone import (
-    PineconeVectorStore,
-    metadata_for_vector,
-)
+from rag_engine.vectorstore.pinecone import PineconeVectorStore
 
 # ---------------------------------------------------------------------------
 # MemoryVectorStore

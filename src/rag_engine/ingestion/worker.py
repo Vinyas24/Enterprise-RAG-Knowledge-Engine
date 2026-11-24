@@ -70,6 +70,9 @@ async def _main(settings: Settings, *, once: bool) -> int:
         await run_forever(processor, poll_interval=settings.worker_poll_interval_seconds)
         return 0
     finally:
+        # Close HTTP/SDK clients before the database so shutdown is ordered:
+        # no new request can start once the processor is closed.
+        await processor.aclose()
         await database.dispose()
 
 

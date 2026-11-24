@@ -14,9 +14,14 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 Metadata = Mapping[str, str | int | float | bool]
+
+
+def metadata_for_vector(metadata: Mapping[str, Any]) -> dict[str, str | int | float | bool]:
+    """Drop ``None`` values, which vector-store metadata does not accept."""
+    return {key: value for key, value in metadata.items() if value is not None}
 
 
 @dataclass(frozen=True, slots=True)

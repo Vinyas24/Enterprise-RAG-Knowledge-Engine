@@ -5,12 +5,13 @@ organization's documents, search them with hybrid retrieval, and answer
 questions with grounded, cited responses — while enforcing tenant and access
 control at retrieval time.
 
-> **Status: Phase 2 — traceable chunking.**
-> The service skeleton (API, configuration, logging, database connectivity,
-> tests, CI, Compose stack) is in place, and documents can be uploaded, parsed,
-> chunked and indexed asynchronously with boundary-aware chunks, exact source
-> offsets and per-chunk access metadata. Retrieval, ranking, generation,
-> guardrails and evaluation land in later phases.
+> **Status: Phase 4 — retrieval and grounded generation.**
+> Documents are uploaded, parsed, chunked, embedded and indexed asynchronously;
+> chunks are searchable by meaning, isolated per tenant and filtered by access
+> clearance. `POST /query` returns an answer grounded in retrieved chunks with
+> verifiable citations. Reindexing and deletion keep PostgreSQL and the vector
+> store consistent, including on failure. Guardrails and the evaluation harness
+> land in later phases.
 
 ---
 
@@ -29,7 +30,10 @@ docker compose up --build
 | `http://localhost:8000/health/ready` | Readiness: PostgreSQL is reachable |
 | `http://localhost:8000/documents` | Upload (`POST`) and list (`GET`) documents |
 | `http://localhost:8000/documents/{id}` | Document status, metadata, latest job |
+| `http://localhost:8000/documents/{id}/chunks` | Stored chunks with citation provenance |
+| `http://localhost:8000/documents/{id}/reindex` | Re-run ingestion for a document |
 | `http://localhost:8000/ingestion-jobs/{id}` | Ingestion job status and errors |
+| `http://localhost:8000/query` | Retrieve, generate, and return citations |
 | `http://localhost:8000/docs` | OpenAPI UI (disabled in production) |
 
 `docker compose` reads `.env` if present; without one it falls back to the
@@ -74,9 +78,10 @@ src/rag_engine/
 ├── core/           configuration, logging, request context, database, models
 ├── ingestion/      upload → parse → chunk → persist, worker, retry, CLI
 │   └── parsers/    PDF, DOCX, Markdown, TXT behind one interface
-├── retrieval/      dense + BM25 retrieval, candidate fusion  (Phase 3+)
-├── ranking/        cross-encoder / Cohere re-ranking         (Phase 4+)
-├── generation/     prompt assembly, LLM calls, citations     (Phase 4+)
+├── embedding/      provider interface, batching, retries, OpenAI adapter
+├── vectorstore/    store interface, memory + Pinecone, stale-vector cleanup
+├── retrieval/      dense retrieval with tenant and clearance filtering
+├── generation/     prompt assembly, LLM providers, citation mapping
 └── guardrails/     input checks, grounding, access control   (Phase 5+)
 tests/
 ├── unit/           hermetic: no database, no network
@@ -111,6 +116,16 @@ is the authoritative list; `.env` is git-ignored.
 | `RAG_WORKER_RETRY_BASE_SECONDS` | `2` | Exponential backoff base |
 | `RAG_WORKER_RETRY_MAX_SECONDS` | `60` | Backoff cap |
 | `RAG_WORKER_VISIBILITY_TIMEOUT_SECONDS` | `300` | Reclaim window for dead workers |
+| `RAG_EMBEDDING_PROVIDER` | `deterministic` | `deterministic` (no key) or `openai` |
+| `RAG_EMBEDDING_DIMENSIONS` | `256` | Must match the Pinecone index dimension |
+| `RAG_EMBEDDING_BATCH_SIZE` | `64` | Texts per provider request |
+| `RAG_EMBEDDING_MAX_RETRIES` | `4` | Retries with exponential backoff |
+| `RAG_VECTOR_STORE` | `memory` | `memory` (tests/local) or `pinecone` |
+| `RAG_PINECONE_INDEX_NAME` | `rag-engine` | Created on first use if absent |
+| `RAG_PINECONE_CONTROL_HOST` | unset | Point at Pinecone Local in Compose |
+| `RAG_RETRIEVAL_TOP_K` | `5` | Default candidates per query |
+| `RAG_RETRIEVAL_MIN_SCORE` | `0.0` | Similarity floor for retrieval |
+| `RAG_LLM_PROVIDER` | `deterministic` | `deterministic` (no key) or `openai` |
 
 Invalid configuration fails at startup with a precise message rather than at
 first use. A plain `postgresql://` DSN is rejected because it silently selects a
@@ -273,6 +288,125 @@ private.
 
 ---
 
+## Embeddings and vector storage (Phase 3)
+
+Goal: a chunk becomes findable by meaning, not only by the words it contains,
+while a document is never reported as searchable before its vectors exist.
+
+**Provider interface.** `Embedder` is a Protocol (`dimensions`, `embed`,
+`close`). `build_embedder(settings)` selects `deterministic` or `openai`.
+The deterministic provider hashes tokens into a fixed-size vector, which makes
+the full pipeline runnable offline and keeps CI free of API keys; it is a test
+double, not a production embedding model. The OpenAI adapter batches inputs,
+retries `429`/`5xx` with exponential backoff and jitter, and surfaces a typed
+`EmbeddingError` for the worker to retry.
+
+**Vector-store interface.** `VectorStore` is a Protocol (`ensure_ready`,
+`upsert`, `delete`, `list_ids`, `query`, `close`). `MemoryVectorStore` is used
+by the test suite; `PineconeVectorStore` is the production adapter. The
+adapter creates the index on first use and validates the dimension and metric
+instead of silently returning bad neighbours.
+
+**Tenant isolation is structural.** Every tenant has its own Pinecone
+namespace (`str(tenant_id)`). A missing metadata filter therefore cannot leak
+another tenant's data. Metadata still carries `tenant_id` for defence in depth
+and for future shared-namespace indexes.
+
+**Ids are deterministic.** A vector id is `"<document_id>:<chunk_index>"` and
+the PostgreSQL chunk id is a UUIDv5 of the same string (`core/ids.py`). A
+retry upserts the same ids, so replacement is idempotent; a shrinking document
+leaves no duplicate tail.
+
+**Write ordering is fail-closed.** The worker embeds, upserts vectors, removes
+stale vectors and only then commits chunks and marks the job `done`. If the
+vector store fails, the transaction is not committed, the job is retried with
+backoff, and the previous chunk/vector set remains searchable. The inverse
+order — commit first, repair later — would mark a document indexed while it is
+not.
+
+**Reindex is explicit.** `POST /documents/{id}/reindex` queues a fresh pass for
+the stored blob (useful after changing embedding model, chunk size or access
+level). It takes a row lock so concurrent requests cannot enqueue duplicate
+jobs, and returns `409` while a job is already queued or processing.
+
+**Delete is fail-closed too.** `DELETE /documents/{id}` purges vectors first.
+If the vector store is unavailable it returns `503` and keeps the document, so
+a retry converges. It refuses with `409` while an ingestion job is active and
+performs the final delete conditionally, so a job that becomes active between
+the check and the commit cannot be orphaned.
+
+### Phase 3 trade-offs
+
+- **Two stores cannot be atomic.** A crash after the vector upsert but before
+  the PostgreSQL commit leaves new vectors next to old chunks. Deterministic
+  ids make the retry a replacement, and the stale-vector sweep (explicit old
+  ids plus a prefix listing) removes anything the new chunk set does not keep.
+- **Deletes enumerate ids instead of filtering metadata.** Not every Pinecone
+  tier supports filtered deletes, and Pinecone Local rejects them. Prefix
+  listing is portable; the trade-off is one extra list call per delete.
+- **Vector listing can be eventually consistent.** Cleanup uses ids read from
+  PostgreSQL first and treats the prefix sweep as a second chance, so a lagging
+  list does not leave known vectors behind.
+- **The embedding dimension is deployment-wide.** Changing the model or
+  dimension requires a new index and a reindex; the adapter fails fast on a
+  mismatch rather than writing unusable vectors.
+
+---
+
+## Retrieval and grounded generation (Phase 4)
+
+Goal: answer a question from the caller's own documents, with citations a
+reader can verify, and say so when the documents do not contain the answer.
+
+**Retrieval.** `POST /query` embeds the question, searches the tenant's
+namespace, hydrates the matching chunks from PostgreSQL, and discards any hit
+whose document or chunk no longer exists. The search is bounded by
+`top_k` and `min_score`; the namespace plus the hydrated `tenant_id` check
+enforce isolation twice.
+
+**Clearance filtering.** Access levels are ordered
+`public < internal < confidential < restricted`. The request may carry a
+clearance (default `internal`); retrieval only returns chunks at or below it. The filter is
+applied in PostgreSQL against the snapshotted chunk `access_level`, so a
+document whose level changed after ingestion cannot bypass it through stale
+vector metadata.
+
+**Generation.** `build_llm(settings)` selects a deterministic provider for
+tests/CI or OpenAI for real answers. The prompt contains only the retrieved
+chunks, numbered, with document titles and section/page provenance, and
+instructs the model to answer solely from them and to admit when they are
+insufficient.
+
+**Citations are data, not prose.** Each answer is returned with the chunk id,
+document id and title, chunk index, a snippet, page span and section path. The
+same provenance is available from `GET /documents/{id}/chunks`, so a citation
+can be checked against the stored chunk. `weak_retrieval` is `true` when no
+chunk cleared the score floor or when the model reports that the context does
+not answer the question, which lets a client distinguish "no answer in the
+corpus" from a confident but unsupported answer.
+
+```bash
+curl -X POST http://localhost:8000/query \
+  -H 'X-Tenant-ID: acme' -H 'Content-Type: application/json' \
+  -d '{"question": "How do I roll back a deployment?", "top_k": 3}'
+```
+
+### Phase 4 trade-offs
+
+- **Dense retrieval only.** BM25/hybrid fusion and a cross-encoder re-ranker
+  are deliberately deferred; they need an evaluation set to prove they help
+  rather than just add latency.
+- **Single-shot generation.** No query rewriting, multi-hop or agent loop yet.
+  One retrieval pass keeps latency and failure modes predictable.
+- **Clearance is supplied by the caller.** Authentication is not implemented;
+  the header-driven tenant and clearance model is the seam where real identity
+  will plug in during Phase 5.
+- **Citations are only as good as chunking.** The chunk span and section path
+  make an answer auditable, but a chunk that mixes ideas will produce a vague
+  citation. That is why chunking quality was treated as a first-class phase.
+
+---
+
 ## Design decisions (Phase 0)
 
 - **App factory, not a module-level singleton for tests.** `create_app(settings,
@@ -357,7 +491,7 @@ make test
 | 0 | Foundation: skeleton, config, logging, DB, tests, CI, Compose ✅ |
 | 1 | Ingestion: upload, parsing, chunking, async jobs, metadata, dedupe ✅ |
 | 2 | Chunking: boundary-aware splits, source offsets, access metadata, inspection ✅ |
-| 3 | Embeddings + Pinecone + BM25 hybrid retrieval with ACL filters |
-| 4 | Re-ranking, grounded generation, citations |
+| 3 | Embeddings + Pinecone, tenant namespaces, consistent reindex/delete ✅ |
+| 4 | Dense retrieval with clearance filters, grounded generation, citations ✅ |
 | 5 | Guardrails and access-control enforcement |
 | 6 | Evaluation harness, latency and irrelevant-context measurements |

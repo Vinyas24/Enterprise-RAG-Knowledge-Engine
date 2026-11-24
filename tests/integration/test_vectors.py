@@ -10,19 +10,27 @@ Acceptance criteria:
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator, Sequence
+from contextlib import asynccontextmanager
 from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
-from httpx2 import AsyncClient
+from httpx2 import ASGITransport, AsyncClient
 
+from rag_engine.api.app import create_app
+from rag_engine.core.config import Settings
 from rag_engine.core.db import PostgresDatabase
-from rag_engine.core.enums import AccessLevel, DocumentStatus
+from rag_engine.core.enums import AccessLevel, DocumentStatus, JobStatus
 from rag_engine.core.ids import chunk_vector_id
-from rag_engine.core.models import Chunk, Document, Tenant
-from rag_engine.ingestion.chunking import ChunkDraft
+from rag_engine.core.models import Chunk, Document, IngestionJob, Tenant
+from rag_engine.embedding import Embedder
+from rag_engine.ingestion.blobstore import LocalBlobStore
+from rag_engine.ingestion.chunking import ChunkDraft, build_chunker
+from rag_engine.ingestion.parsers import ParserRegistry
 from rag_engine.ingestion.processor import IngestionProcessor
 from rag_engine.vectorstore.base import VectorRecord
+from rag_engine.vectorstore.errors import VectorStoreUnavailable
 from rag_engine.vectorstore.memory import MemoryVectorStore
 from rag_engine.vectorstore.pinecone import PineconeVectorStore
 
@@ -313,3 +321,252 @@ async def test_pinecone_local_sync_and_query() -> None:
     # Cleanup
     await store.delete(test_ns, [v1])
     await store.close()
+
+
+# ---------------------------------------------------------------------------
+# Cross-store consistency: failure paths and reindex
+# ---------------------------------------------------------------------------
+
+
+class _FailingUpsertStore(MemoryVectorStore):
+    """Vector store that accepts the index but rejects every write."""
+
+    async def upsert(self, namespace: str, records: Sequence[VectorRecord]) -> None:
+        raise VectorStoreUnavailable("simulated vector-store outage")
+
+
+class _FailingDeleteStore(MemoryVectorStore):
+    """Vector store that can be read but not written during deletion."""
+
+    async def delete(self, namespace: str, ids: Sequence[str]) -> None:
+        raise VectorStoreUnavailable("simulated vector-store outage")
+
+
+def _processor_with(
+    settings: Settings,
+    *,
+    database: PostgresDatabase,
+    storage: LocalBlobStore,
+    embedder: Embedder,
+    vector_store: MemoryVectorStore,
+) -> IngestionProcessor:
+    return IngestionProcessor(
+        database=database,
+        blob_store=storage,
+        parsers=ParserRegistry.default(),
+        chunker=build_chunker(settings),
+        embedder=embedder,
+        vector_store=vector_store,
+        settings=settings,
+    )
+
+
+@asynccontextmanager
+async def _client_for_store(
+    settings: Settings,
+    *,
+    database: PostgresDatabase,
+    storage: LocalBlobStore,
+    embedder: Embedder,
+    vector_store: MemoryVectorStore,
+) -> AsyncIterator[AsyncClient]:
+    application = create_app(
+        settings,
+        database=database,
+        blob_store=storage,
+        vector_store=vector_store,
+        embedder=embedder,
+    )
+    async with application.router.lifespan_context(application):
+        transport = ASGITransport(app=application)
+        async with AsyncClient(transport=transport, base_url="http://testserver") as client:
+            yield client
+
+
+async def test_vector_upsert_failure_keeps_job_retryable_and_old_chunks(
+    api_client: AsyncClient,
+    auth_headers: dict[str, str],
+    tenant: Tenant,
+    test_settings: Settings,
+    database: PostgresDatabase,
+    storage: LocalBlobStore,
+    embedder: Embedder,
+) -> None:
+    """A vector failure must not mark the document indexed."""
+    resp = await _upload(api_client, auth_headers)
+    doc_id = UUID(resp.json()["document_id"])
+
+    processor = _processor_with(
+        test_settings,
+        database=database,
+        storage=storage,
+        embedder=embedder,
+        vector_store=_FailingUpsertStore(dimension=test_settings.embedding_dimensions),
+    )
+    outcome = await processor.process_next()
+    assert outcome.succeeded is False
+
+    async with database.session() as session:
+        document = await session.get(Document, doc_id)
+        assert document is not None
+        assert document.status is DocumentStatus.PENDING
+        assert document.chunk_count == 0
+
+        job = await session.get(IngestionJob, outcome.job_id)
+        assert job is not None
+        assert job.status is JobStatus.QUEUED
+        assert job.attempts == 1
+        assert job.error is not None and "VectorStoreUnavailable" in job.error
+
+
+async def test_delete_returns_503_and_keeps_document_when_vectors_fail(
+    api_client: AsyncClient,
+    auth_headers: dict[str, str],
+    tenant: Tenant,
+    processor: IngestionProcessor,
+    vector_store: MemoryVectorStore,
+    test_settings: Settings,
+    database: PostgresDatabase,
+    storage: LocalBlobStore,
+    embedder: Embedder,
+) -> None:
+    resp = await _upload(api_client, auth_headers)
+    doc_id = UUID(resp.json()["document_id"])
+    assert (await processor.process_next()).succeeded is True
+    namespace = str(tenant.id)
+    vectors_before = await vector_store.list_ids(namespace)
+    assert vectors_before
+
+    failing_store = _FailingDeleteStore(dimension=test_settings.embedding_dimensions)
+    await failing_store.upsert(
+        namespace,
+        [
+            VectorRecord(
+                id=vector_id,
+                values=[0.0] * test_settings.embedding_dimensions,
+                metadata={"document_id": str(doc_id)},
+            )
+            for vector_id in vectors_before
+        ],
+    )
+
+    async with _client_for_store(
+        test_settings,
+        database=database,
+        storage=storage,
+        embedder=embedder,
+        vector_store=failing_store,
+    ) as client:
+        deleted = await client.delete(f"/documents/{doc_id}", headers=auth_headers)
+        assert deleted.status_code == 503
+        assert deleted.json()["error"]["code"] == "vector_store_unavailable"
+
+        # The document is still readable and its vectors are untouched.
+        still_there = await client.get(f"/documents/{doc_id}", headers=auth_headers)
+        assert still_there.status_code == 200
+
+    assert await failing_store.list_ids(namespace) == vectors_before
+
+
+async def test_reindex_replaces_vectors_and_removes_stale_tail(
+    api_client: AsyncClient,
+    auth_headers: dict[str, str],
+    tenant: Tenant,
+    processor: IngestionProcessor,
+    vector_store: MemoryVectorStore,
+    database: PostgresDatabase,
+) -> None:
+    resp = await _upload(api_client, auth_headers)
+    doc_id = UUID(resp.json()["document_id"])
+    first = await processor.process_next()
+    assert first.succeeded is True
+
+    namespace = str(tenant.id)
+    stale_id = chunk_vector_id(doc_id, first.chunk_count + 5)
+    await vector_store.upsert(
+        namespace,
+        [VectorRecord(id=stale_id, values=[0.0] * 256, metadata={"document_id": str(doc_id)})],
+    )
+
+    reindexed = await api_client.post(f"/documents/{doc_id}/reindex", headers=auth_headers)
+    assert reindexed.status_code == 202
+    assert reindexed.json()["document_id"] == str(doc_id)
+
+    second = await processor.process_next()
+    assert second.succeeded is True
+    assert second.chunk_count == first.chunk_count
+
+    expected = [chunk_vector_id(doc_id, i) for i in range(second.chunk_count)]
+    assert await vector_store.list_ids(namespace) == sorted(expected)
+
+    async with database.session() as session:
+        document = await session.get(Document, doc_id)
+        assert document is not None
+        assert document.status is DocumentStatus.INDEXED
+
+
+async def test_reindex_conflicts_with_active_job(
+    api_client: AsyncClient,
+    auth_headers: dict[str, str],
+    tenant: Tenant,
+) -> None:
+    resp = await _upload(api_client, auth_headers)
+    doc_id = UUID(resp.json()["document_id"])
+
+    conflict = await api_client.post(f"/documents/{doc_id}/reindex", headers=auth_headers)
+    assert conflict.status_code == 409
+    assert conflict.json()["error"]["code"] == "job_in_progress"
+
+
+async def test_delete_conflicts_with_active_job(
+    api_client: AsyncClient,
+    auth_headers: dict[str, str],
+) -> None:
+    resp = await _upload(api_client, auth_headers)
+    doc_id = UUID(resp.json()["document_id"])
+
+    conflict = await api_client.delete(f"/documents/{doc_id}", headers=auth_headers)
+    assert conflict.status_code == 409
+    assert conflict.json()["error"]["code"] == "job_in_progress"
+
+    still_there = await api_client.get(f"/documents/{doc_id}", headers=auth_headers)
+    assert still_there.status_code == 200
+
+
+async def test_delete_reports_409_when_a_job_becomes_active(
+    api_client: AsyncClient,
+    auth_headers: dict[str, str],
+    processor: IngestionProcessor,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The final conditional delete is the last line of defence."""
+    resp = await _upload(api_client, auth_headers)
+    doc_id = UUID(resp.json()["document_id"])
+    assert (await processor.process_next()).succeeded is True
+
+    from rag_engine.ingestion import repository
+
+    async def _busy(*_args: Any, **_kwargs: Any) -> bool:
+        return False
+
+    monkeypatch.setattr(repository, "delete_document_if_idle", _busy)
+
+    conflict = await api_client.delete(f"/documents/{doc_id}", headers=auth_headers)
+    assert conflict.status_code == 409
+    assert conflict.json()["error"]["code"] == "job_in_progress"
+
+    still_there = await api_client.get(f"/documents/{doc_id}", headers=auth_headers)
+    assert still_there.status_code == 200
+
+
+async def test_reindex_of_other_tenants_document_is_404(
+    api_client: AsyncClient,
+    auth_headers: dict[str, str],
+    create_tenant: Any,
+) -> None:
+    other: Tenant = await create_tenant("reindex-other", "Other")
+    uploaded = await _upload(api_client, {"X-Tenant-ID": other.slug})
+    other_doc_id = uploaded.json()["document_id"]
+
+    resp = await api_client.post(f"/documents/{other_doc_id}/reindex", headers=auth_headers)
+    assert resp.status_code == 404

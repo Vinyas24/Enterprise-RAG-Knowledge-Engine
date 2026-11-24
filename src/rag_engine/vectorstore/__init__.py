@@ -8,7 +8,7 @@ code path.
 
 from __future__ import annotations
 
-from .base import Metadata, VectorMatch, VectorRecord, VectorStore
+from .base import Metadata, VectorMatch, VectorRecord, VectorStore, metadata_for_vector
 from .errors import VectorStoreConfigurationError, VectorStoreError, VectorStoreUnavailable
 from .factory import build_vector_store
 from .maintenance import delete_document_vectors, delete_stale_vectors, delete_vectors
@@ -29,4 +29,5 @@ __all__ = [
     "delete_document_vectors",
     "delete_stale_vectors",
     "delete_vectors",
+    "metadata_for_vector",
 ]

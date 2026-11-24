@@ -6,11 +6,18 @@ Transaction boundaries are deliberate:
   other workers can pick up other jobs.
 * Parsing and embedding happen entirely outside a transaction (CPU/network work
   has no business holding a database connection).
-* Results are written in one transaction, so a document is never half-indexed.
-* Vector upsert happens *after* PostgreSQL commits, so the ids written by
-  ``complete_job`` already exist. If the upsert fails, the next retry will
-  re-embed and upsert from scratch; orphan vectors are cleaned up by the stale
-  vector sweep.
+* Vectors are written **before** the PostgreSQL completion transaction. A
+  document is only marked ``indexed`` once its vectors are durable, and a
+  vector-store failure leaves the previous chunks/vectors in place so the job
+  can retry. The alternative (commit first, repair later) marks a document
+  searchable when it is not.
+* The final write is one transaction, so chunks, document status and job status
+  move together.
+
+Cross-store writes cannot be atomic. The failure window is therefore explicit:
+if the database commit fails after vectors were upserted, the job retries and
+the deterministic ids make the retry an idempotent replacement. A stale-vector
+sweep removes ids that the new chunk set no longer contains.
 """
 
 from __future__ import annotations
@@ -23,6 +30,7 @@ from uuid import UUID
 from rag_engine.core.config import Settings
 from rag_engine.core.db import DatabaseProtocol
 from rag_engine.core.enums import AccessLevel
+from rag_engine.core.ids import chunk_vector_id
 from rag_engine.core.models import Document
 from rag_engine.embedding import Embedder
 from rag_engine.ingestion import repository
@@ -30,7 +38,7 @@ from rag_engine.ingestion.blobstore import BlobStore, verify_content
 from rag_engine.ingestion.chunking import ChunkDraft, ChunkingStrategy
 from rag_engine.ingestion.errors import IngestionError
 from rag_engine.ingestion.parsers import ParserRegistry
-from rag_engine.vectorstore import VectorRecord, VectorStore
+from rag_engine.vectorstore import VectorRecord, VectorStore, metadata_for_vector
 from rag_engine.vectorstore.maintenance import delete_stale_vectors
 
 logger = logging.getLogger(__name__)
@@ -106,7 +114,43 @@ class IngestionProcessor:
 
         try:
             extraction = await self._extract(job.document_id)
+            namespace = str(job.tenant_id)
+
+            # Previous ids come from the chunks currently committed. They let
+            # us delete a shrinking document's tail immediately, without
+            # depending on list consistency in the vector backend.
+            async with self._database.session() as session:
+                previous_vector_ids = await repository.get_chunk_vector_ids(
+                    session, document_id=job.document_id
+                )
+
+            records = self._vector_records(job.document_id, job.tenant_id, extraction)
+            new_vector_ids = [record.id for record in records]
+
+            # Vectors first: a document is never marked indexed without them.
+            await self._vector_store.upsert(namespace, records)
+            await delete_stale_vectors(
+                self._vector_store,
+                namespace,
+                job.document_id,
+                keep_ids=new_vector_ids,
+                previous_ids=previous_vector_ids,
+            )
+
+            async with self._database.session() as session:
+                await repository.complete_job(
+                    session,
+                    job_id=job.id,
+                    document_id=job.document_id,
+                    tenant_id=job.tenant_id,
+                    drafts=extraction.drafts,
+                    access_level=extraction.access_level,
+                )
+                await session.commit()
         except Exception as exc:
+            # Any failure before the commit leaves the previous chunks intact
+            # and the job retryable. Deterministic ids make the retry replace
+            # vectors rather than duplicate them.
             await self._record_failure(job.id, exc)
             logger.error(
                 "ingestion.job_failed",
@@ -119,73 +163,6 @@ class IngestionProcessor:
                 exc_info=True,
             )
             return ProcessOutcome(processed=True, job_id=job.id, succeeded=False)
-
-        # --- Persist chunks and collect id mapping ---
-        # Read previous vector ids *before* we overwrite the chunks.
-        async with self._database.session() as session:
-            previous_vector_ids = await repository.get_chunk_vector_ids(
-                session, document_id=job.document_id
-            )
-
-        async with self._database.session() as session:
-            id_pairs = await repository.complete_job(
-                session,
-                job_id=job.id,
-                document_id=job.document_id,
-                tenant_id=job.tenant_id,
-                drafts=extraction.drafts,
-                access_level=extraction.access_level,
-            )
-            await session.commit()
-
-        # --- Upsert vectors (after PG commit) ---
-        namespace = str(job.tenant_id)
-        new_vector_ids: list[str] = []
-        if extraction.vectors and id_pairs:
-            records = [
-                VectorRecord(
-                    id=vector_id,
-                    values=extraction.vectors[i],
-                    metadata={
-                        "document_id": str(job.document_id),
-                        "tenant_id": str(job.tenant_id),
-                        "chunk_index": i,
-                        "access_level": str(extraction.access_level),
-                    },
-                )
-                for i, (_chunk_uuid, vector_id) in enumerate(id_pairs)
-            ]
-            new_vector_ids = [r.id for r in records]
-            try:
-                await self._vector_store.upsert(namespace, records)
-            except Exception:
-                logger.error(
-                    "ingestion.vector_upsert_failed",
-                    extra={
-                        "job_id": str(job.id),
-                        "document_id": str(job.document_id),
-                    },
-                    exc_info=True,
-                )
-                # Vectors will be repaired on the next re-ingestion attempt.
-                # The job itself succeeded in PG, so we do not fail it.
-
-        # --- Remove stale vectors from previous ingestion ---
-        if previous_vector_ids or new_vector_ids:
-            try:
-                await delete_stale_vectors(
-                    self._vector_store,
-                    namespace,
-                    job.document_id,
-                    keep_ids=new_vector_ids,
-                    previous_ids=previous_vector_ids,
-                )
-            except Exception:
-                logger.warning(
-                    "ingestion.stale_vector_cleanup_failed",
-                    extra={"document_id": str(job.document_id)},
-                    exc_info=True,
-                )
 
         logger.info(
             "ingestion.job_completed",
@@ -231,6 +208,64 @@ class IngestionProcessor:
         vectors = await self._embedder.embed(texts)
 
         return Extraction(drafts=drafts, access_level=access_level, vectors=vectors)
+
+    def _vector_records(
+        self, document_id: UUID, tenant_id: UUID, extraction: Extraction
+    ) -> list[VectorRecord]:
+        """Pair each draft with its embedding and the metadata retrieval needs."""
+        if len(extraction.vectors) != len(extraction.drafts):
+            raise IngestionError(
+                f"embedder returned {len(extraction.vectors)} vectors for "
+                f"{len(extraction.drafts)} chunks"
+            )
+
+        records: list[VectorRecord] = []
+        for index, (draft, vector) in enumerate(
+            zip(extraction.drafts, extraction.vectors, strict=True)
+        ):
+            if len(vector) != self._embedder.dimensions:
+                raise IngestionError(
+                    f"embedding {index} has {len(vector)} dimensions, "
+                    f"expected {self._embedder.dimensions}"
+                )
+            records.append(
+                VectorRecord(
+                    id=chunk_vector_id(document_id, index),
+                    values=vector,
+                    metadata=metadata_for_vector(
+                        {
+                            "document_id": str(document_id),
+                            "tenant_id": str(tenant_id),
+                            "chunk_index": index,
+                            "access_level": str(extraction.access_level),
+                            "page_start": draft.page_start,
+                            "page_end": draft.page_end,
+                            "section_path": draft.section_path,
+                            "start_char": draft.start_char,
+                            "end_char": draft.end_char,
+                        }
+                    ),
+                )
+            )
+        return records
+
+    async def aclose(self) -> None:
+        """Release embedding and vector-store clients on worker shutdown.
+
+        Each client is closed independently and failures are logged rather
+        than raised: shutdown must not fail because a socket is already gone,
+        and one broken client must not prevent the other from closing.
+        """
+        for component, close in (
+            ("embedder", self._embedder.close),
+            ("vector_store", self._vector_store.close),
+        ):
+            try:
+                await close()
+            except Exception:
+                logger.warning(
+                    "ingestion.close_failed", extra={"component": component}, exc_info=True
+                )
 
     async def _record_failure(self, job_id: UUID, exc: Exception) -> None:
         error = f"{type(exc).__name__}: {exc}"[:_MAX_STORED_ERROR_CHARS]

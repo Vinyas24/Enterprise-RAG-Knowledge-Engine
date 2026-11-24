@@ -26,10 +26,14 @@ class _FakeProcessor:
     def __init__(self, *, processed: bool = False) -> None:
         self.processed = processed
         self.calls = 0
+        self.closed = False
 
     async def process_next(self) -> ProcessOutcome:
         self.calls += 1
         return ProcessOutcome(processed=self.processed)
+
+    async def aclose(self) -> None:
+        self.closed = True
 
 
 class _FakeLoop:
@@ -126,6 +130,7 @@ async def test_main_once_processes_and_disposes(monkeypatch: pytest.MonkeyPatch)
     assert await _main(settings, once=True) == 0
 
     assert processor.calls == 1
+    assert processor.closed is True
     assert database.disposed is True
 
 

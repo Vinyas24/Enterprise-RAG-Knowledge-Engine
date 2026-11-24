@@ -21,7 +21,7 @@ from urllib.parse import urlsplit
 
 from pinecone import Pinecone, ServerlessSpec
 
-from .base import Metadata, VectorMatch, VectorRecord
+from .base import VectorMatch, VectorRecord
 from .errors import VectorStoreConfigurationError, VectorStoreError, VectorStoreUnavailable
 
 logger = logging.getLogger(__name__)
@@ -257,8 +257,3 @@ def _field(value: Any, name: str) -> Any:
 
 def _batched(items: Sequence[VectorRecord] | list[str], size: int) -> list[Sequence[Any]]:
     return [items[start : start + size] for start in range(0, len(items), size)]
-
-
-def metadata_for_vector(metadata: Metadata) -> dict[str, str | int | float | bool]:
-    """Drop ``None`` values, which Pinecone metadata does not accept."""
-    return {key: value for key, value in metadata.items() if value is not None}

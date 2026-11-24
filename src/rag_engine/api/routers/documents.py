@@ -29,11 +29,12 @@ from rag_engine.api.schemas import (
 )
 from rag_engine.api.uploads import read_upload_limited
 from rag_engine.core.config import Settings
-from rag_engine.core.enums import AccessLevel, DocumentStatus
+from rag_engine.core.enums import AccessLevel, DocumentStatus, JobStatus
 from rag_engine.core.models import Tenant
 from rag_engine.ingestion import repository
 from rag_engine.ingestion.service import IngestionService
 from rag_engine.vectorstore import VectorStore
+from rag_engine.vectorstore.errors import VectorStoreError
 from rag_engine.vectorstore.maintenance import delete_document_vectors
 
 logger = logging.getLogger(__name__)
@@ -165,15 +166,66 @@ async def list_document_chunks(
     )
 
 
+@router.post(
+    "/{document_id}/reindex",
+    status_code=status.HTTP_202_ACCEPTED,
+    response_model=DocumentAccepted,
+    summary="Re-run ingestion for an existing document",
+    description=(
+        "Queues a fresh parse → chunk → embed → upsert pass for the stored "
+        "blob. Use it after changing the embedding model, chunking settings or "
+        "access level, or to repair a failed job. Existing chunks stay "
+        "searchable until the new vectors are written. Returns 409 while "
+        "another job is queued or processing."
+    ),
+)
+async def reindex_document(
+    document_id: UUID,
+    tenant: Annotated[Tenant, Depends(get_tenant)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    settings: Annotated[Settings, Depends(get_app_settings)],
+) -> DocumentAccepted:
+    # The row lock serialises concurrent reindex requests: both would otherwise
+    # observe "no active job" and enqueue duplicate work.
+    document = await repository.get_document(
+        session, tenant_id=tenant.id, document_id=document_id, for_update=True
+    )
+    if document is None:
+        raise ApiError(404, "document_not_found", "document not found")
+
+    latest = await repository.latest_job_for_document(session, document_id=document.id)
+    if latest is not None and latest.status in (JobStatus.QUEUED, JobStatus.PROCESSING):
+        raise ApiError(
+            409,
+            "job_in_progress",
+            "document already has a queued or processing job",
+            details={"job_id": str(latest.id), "status": str(latest.status)},
+        )
+
+    job = await repository.enqueue_job(
+        session,
+        document_id=document.id,
+        tenant_id=tenant.id,
+        max_attempts=settings.worker_max_attempts,
+    )
+    await session.commit()
+    logger.info(
+        "document.reindex_queued",
+        extra={"document_id": str(document.id), "job_id": str(job.id)},
+    )
+    return DocumentAccepted(document_id=document.id, job_id=job.id, status=job.status)
+
+
 @router.delete(
     "/{document_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Delete a document and its vectors",
     description=(
-        "Removes the document, its chunks and ingestion jobs from PostgreSQL, "
-        "then purges the corresponding vectors from the vector store. The "
-        "response is returned after the database delete commits; the vector "
-        "cleanup is best-effort (logged if it fails)."
+        "Purges the document's vectors first, then deletes the document, its "
+        "chunks and ingestion jobs. If the vector store is unavailable the "
+        "request fails with 503 and nothing is deleted, so a retry converges "
+        "instead of leaving orphan vectors. Returns 409 while an ingestion job "
+        "is queued or processing."
     ),
 )
 async def delete_document(
@@ -182,26 +234,54 @@ async def delete_document(
     session: Annotated[AsyncSession, Depends(get_session)],
     vector_store: Annotated[VectorStore, Depends(get_vector_store)],
 ) -> JSONResponse:
-    document = await repository.get_document(session, tenant_id=tenant.id, document_id=document_id)
+    # Lock the row so a concurrent reindex cannot enqueue between the check and
+    # the delete. Reindex takes the same lock.
+    document = await repository.get_document(
+        session, tenant_id=tenant.id, document_id=document_id, for_update=True
+    )
     if document is None:
         raise ApiError(404, "document_not_found", "document not found")
 
-    # Read vector ids before deleting the PG rows.
-    vector_ids = await repository.get_chunk_vector_ids(session, document_id=document_id)
-    namespace = str(tenant.id)
-
-    await repository.delete_document(session, document_id=document_id)
-    await session.commit()
-
-    # Best-effort vector cleanup: the PG rows are already gone, so even if the
-    # vector store is unreachable the data is logically deleted.
-    try:
-        await delete_document_vectors(vector_store, namespace, document_id, known_ids=vector_ids)
-    except Exception:
-        logger.warning(
-            "document.vector_cleanup_failed",
-            extra={"document_id": str(document_id)},
-            exc_info=True,
+    latest = await repository.latest_job_for_document(session, document_id=document.id)
+    if latest is not None and latest.status in (JobStatus.QUEUED, JobStatus.PROCESSING):
+        raise ApiError(
+            409,
+            "job_in_progress",
+            "document has an active ingestion job; retry after it finishes",
+            details={"job_id": str(latest.id), "status": str(latest.status)},
         )
 
+    # Read vector ids before deleting the PostgreSQL rows; the prefix sweep in
+    # the helper also catches ids the rows do not know about.
+    vector_ids = await repository.get_chunk_vector_ids(session, document_id=document.id)
+    namespace = str(tenant.id)
+
+    try:
+        await delete_document_vectors(vector_store, namespace, document.id, known_ids=vector_ids)
+    except VectorStoreError as exc:
+        logger.warning(
+            "document.vector_cleanup_failed",
+            extra={"document_id": str(document.id)},
+            exc_info=True,
+        )
+        raise ApiError(
+            503,
+            "vector_store_unavailable",
+            "could not delete vectors; the document was not deleted",
+        ) from exc
+
+    # Conditional delete closes the race with a job that became active after
+    # the check above.
+    deleted = await repository.delete_document_if_idle(
+        session, tenant_id=tenant.id, document_id=document.id
+    )
+    if not deleted:
+        raise ApiError(
+            409,
+            "job_in_progress",
+            "document has an active ingestion job; retry after it finishes",
+        )
+    await session.commit()
+
+    logger.info("document.deleted", extra={"document_id": str(document.id)})
     return JSONResponse(status_code=status.HTTP_204_NO_CONTENT, content=None)

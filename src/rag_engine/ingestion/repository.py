@@ -51,9 +51,17 @@ async def find_document_by_hash(
 
 
 async def get_document(
-    session: AsyncSession, *, tenant_id: UUID, document_id: UUID
+    session: AsyncSession,
+    *,
+    tenant_id: UUID,
+    document_id: UUID,
+    for_update: bool = False,
 ) -> Document | None:
     statement = select(Document).where(Document.id == document_id, Document.tenant_id == tenant_id)
+    if for_update:
+        # Serialises reindex requests for the same document, so two callers
+        # cannot both observe "no active job" and enqueue duplicates.
+        statement = statement.with_for_update()
     return (await session.execute(statement)).scalar_one_or_none()
 
 
@@ -151,6 +159,32 @@ async def create_document_with_job(
 # ---------------------------------------------------------------------------
 # Jobs
 # ---------------------------------------------------------------------------
+
+
+async def enqueue_job(
+    session: AsyncSession, *, document_id: UUID, tenant_id: UUID, max_attempts: int
+) -> IngestionJob:
+    """Queue a fresh ingestion attempt for an existing document.
+
+    Used by reindex: the content-addressed blob is unchanged, but chunks and
+    vectors are rebuilt (for example after an embedding-model change or a
+    previously failed attempt).
+    """
+    now = utcnow()
+    job = IngestionJob(
+        document_id=document_id,
+        tenant_id=tenant_id,
+        max_attempts=max_attempts,
+        available_at=now,
+    )
+    session.add(job)
+    await session.execute(
+        update(Document)
+        .where(Document.id == document_id, Document.tenant_id == tenant_id)
+        .values(status=DocumentStatus.PENDING, updated_at=now)
+    )
+    await session.flush()
+    return job
 
 
 async def get_job(session: AsyncSession, *, tenant_id: UUID, job_id: UUID) -> IngestionJob | None:
@@ -379,8 +413,27 @@ async def get_chunk_vector_ids(session: AsyncSession, *, document_id: UUID) -> l
     return [chunk_vector_id(document_id, index) for index in rows]
 
 
-async def delete_document(session: AsyncSession, *, document_id: UUID) -> bool:
-    """Delete a document, its chunks and jobs. Returns False if not found."""
-    statement = delete(Document).where(Document.id == document_id).returning(Document.id)
+async def delete_document_if_idle(
+    session: AsyncSession, *, tenant_id: UUID, document_id: UUID
+) -> bool:
+    """Delete a document only when no queued/processing job can write to it.
+
+    The caller deletes vectors before calling this. Making the final delete
+    conditional closes the race where a reindex is enqueued (or a worker claims
+    a job) between the API's initial check and the commit. ``False`` means the
+    document still exists because a job became active; the caller reports 409.
+    """
+    active_documents = select(IngestionJob.document_id).where(
+        IngestionJob.status.in_((JobStatus.QUEUED, JobStatus.PROCESSING))
+    )
+    statement = (
+        delete(Document)
+        .where(
+            Document.id == document_id,
+            Document.tenant_id == tenant_id,
+            Document.id.notin_(active_documents),
+        )
+        .returning(Document.id)
+    )
     deleted_id = (await session.execute(statement)).scalar_one_or_none()
     return deleted_id is not None
