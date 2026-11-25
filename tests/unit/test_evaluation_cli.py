@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from rag_engine.core.config import Settings
+from rag_engine.core.config import RetrievalMode, Settings
 from rag_engine.evaluation import cli as evaluation_cli
 from rag_engine.evaluation.cli import run_command
 from rag_engine.evaluation.report import EvaluationReport
@@ -67,6 +67,11 @@ def _args(dataset: Path) -> Namespace:
         dataset=dataset,
         top_k=None,
         min_score=None,
+        retriever=None,
+        dense_weight=None,
+        keyword_weight=None,
+        rrf_k=None,
+        keyword_candidates=None,
         baseline=None,
         save_baseline=None,
         json_output=None,
@@ -123,3 +128,45 @@ def test_run_command_prints_and_writes_every_requested_artifact(
         )
         == expected
     )
+
+
+def test_retriever_and_fusion_overrides_reach_the_harness(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    async def fake_run_evaluation(**kwargs: object) -> EvaluationReport:
+        captured.update(kwargs)
+        return _report()
+
+    monkeypatch.setattr(evaluation_cli, "run_evaluation", fake_run_evaluation)
+    args = _args(tmp_path / "dataset.json")
+    args.retriever = "dense"
+    args.dense_weight = 2.0
+    args.keyword_weight = 0.25
+    args.rrf_k = 30
+    args.keyword_candidates = 50
+
+    assert run_command(args, Settings(_env_file=None)) == 0
+
+    settings = captured["settings"]
+    assert isinstance(settings, Settings)
+    assert settings.retrieval_mode is RetrievalMode.DENSE
+    assert settings.hybrid_dense_weight == 2.0
+    assert settings.hybrid_keyword_weight == 0.25
+    assert settings.hybrid_rrf_k == 30
+    assert settings.retrieval_keyword_candidates == 50
+
+
+def test_zero_fusion_weights_are_rejected_before_any_database_work(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    args = _args(tmp_path / "dataset.json")
+    args.dense_weight = 0.0
+    args.keyword_weight = 0.0
+
+    exit_code = run_command(args, Settings(_env_file=None))
+
+    assert exit_code == 2
+    assert "cannot both be zero" in capsys.readouterr().err

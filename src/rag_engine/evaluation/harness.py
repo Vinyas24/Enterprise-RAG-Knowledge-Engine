@@ -21,7 +21,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 
-from rag_engine.core.config import Settings
+from rag_engine.core.config import RetrievalMode, Settings
 from rag_engine.core.db import DatabaseProtocol
 from rag_engine.core.enums import DocumentStatus
 from rag_engine.core.ids import chunk_vector_id
@@ -101,7 +101,9 @@ async def evaluate_dataset(
 
     metrics = aggregate_metrics(results, k=resolved_k)
     fingerprint = dataset_fingerprint(dataset)
+    hybrid = settings.retrieval_mode is RetrievalMode.HYBRID
     config = EvaluationConfig(
+        retriever=settings.retrieval_mode.value,
         embedding_provider=settings.embedding_provider,
         embedding_dimensions=settings.embedding_dimensions,
         chunk_size_chars=settings.chunk_size_chars,
@@ -109,6 +111,10 @@ async def evaluate_dataset(
         vector_store=settings.vector_store,
         top_k=resolved_k,
         min_score=resolved_min_score,
+        keyword_candidates=settings.retrieval_keyword_candidates if hybrid else None,
+        hybrid_dense_weight=settings.hybrid_dense_weight if hybrid else None,
+        hybrid_keyword_weight=settings.hybrid_keyword_weight if hybrid else None,
+        hybrid_rrf_k=settings.hybrid_rrf_k if hybrid else None,
     )
     warnings = list(cleanup_warnings)
     if not 30 <= len(dataset.questions) <= 50:
@@ -328,8 +334,14 @@ def _baseline_warnings(
     changed = [
         name
         for name in type(config).model_fields
-        if getattr(config, name) != getattr(baseline.config, name)
+        if name != "retriever" and getattr(config, name) != getattr(baseline.config, name)
     ]
     if changed:
         warnings.append("baseline configuration differs: " + ", ".join(sorted(changed)))
+    if baseline.config.retriever != config.retriever:
+        warnings.append(
+            f"baseline used retriever {baseline.config.retriever!r} and this run used "
+            f"{config.retriever!r}; the delta is the effect of that change, not a "
+            "like-for-like comparison"
+        )
     return warnings

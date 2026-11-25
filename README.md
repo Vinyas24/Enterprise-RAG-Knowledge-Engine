@@ -82,13 +82,14 @@ src/rag_engine/
 │   └── parsers/    PDF, DOCX, Markdown, TXT behind one interface
 ├── embedding/      provider interface, batching, retries, OpenAI adapter
 ├── vectorstore/    store interface, memory + Pinecone, stale-vector cleanup
-├── retrieval/      dense retrieval with tenant and clearance filtering
+├── retrieval/      dense, BM25 keyword and hybrid retrieval with rank fusion
 ├── generation/     prompt assembly, LLM providers, citation mapping
 ├── evaluation/     dataset loader, metrics, isolated harness, CLI report
-└── guardrails/     input checks, grounding, access control   (Phase 6+)
+└── guardrails/     input checks, grounding, access control   (Phase 7+)
 eval/
 ├── datasets/       committed corpus and labeled questions
-└── baselines/      saved reports used for comparison
+├── baselines/      saved reports used for comparison
+└── reports/        rendered reports committed with a phase
 tests/
 ├── unit/           hermetic: no database, no network
 └── integration/    real PostgreSQL via RAG_TEST_DATABASE_URL
@@ -130,7 +131,12 @@ is the authoritative list; `.env` is git-ignored.
 | `RAG_PINECONE_INDEX_NAME` | `rag-engine` | Created on first use if absent |
 | `RAG_PINECONE_CONTROL_HOST` | unset | Point at Pinecone Local in Compose |
 | `RAG_RETRIEVAL_TOP_K` | `5` | Default candidates per query |
-| `RAG_RETRIEVAL_MIN_SCORE` | `0.0` | Similarity floor for retrieval |
+| `RAG_RETRIEVAL_MIN_SCORE` | `0.0` | Dense similarity floor (ignored by BM25) |
+| `RAG_RETRIEVAL_MODE` | `hybrid` | `dense` (Phase 4 behaviour) or `hybrid` |
+| `RAG_HYBRID_DENSE_WEIGHT` | `1.0` | RRF weight for the dense ranking |
+| `RAG_HYBRID_KEYWORD_WEIGHT` | `1.0` | RRF weight for the BM25 ranking |
+| `RAG_HYBRID_RRF_K` | `60` | RRF damping constant |
+| `RAG_RETRIEVAL_KEYWORD_CANDIDATES` | `200` | Full-text candidates BM25 re-ranks |
 | `RAG_LLM_PROVIDER` | `deterministic` | `deterministic` (no key) or `openai` |
 
 Invalid configuration fails at startup with a precise message rather than at
@@ -434,8 +440,11 @@ embeddings, 256 dimensions, the in-memory store, default chunking
 ```bash
 RAG_DATABASE_URL=postgresql+asyncpg://rag:rag_dev_password@localhost:55432/rag \
 RAG_VECTOR_STORE=memory RAG_EMBEDDING_PROVIDER=deterministic \
-RAG_EMBEDDING_DIMENSIONS=256 make eval
+RAG_EMBEDDING_DIMENSIONS=256 make eval EVAL_ARGS="--retriever dense"
 ```
+
+(Phase 6 made hybrid the default, so `--retriever dense` is what reproduces
+this baseline; see the Phase 6 section.)
 
 `make eval` prints the Markdown report and automatically compares against
 `eval/baselines/dense_baseline.json` when it exists. Pass extra flags through
@@ -446,9 +455,10 @@ make eval EVAL_ARGS="--json-output eval/reports/current.json \
   --save-baseline eval/baselines/dense_baseline.json"
 ```
 
-The CLI also accepts `--dataset`, `--top-k`, `--min-score`, `--baseline` and
-`--markdown-output`. Evaluation needs only PostgreSQL and the configured
-vector store; it does not need the API or worker to be running.
+The CLI also accepts `--dataset`, `--top-k`, `--min-score`, `--retriever`,
+`--dense-weight`, `--keyword-weight`, `--rrf-k`, `--keyword-candidates`,
+`--baseline` and `--markdown-output`. Evaluation needs only PostgreSQL and the
+configured vector store; it does not need the API or worker to be running.
 
 **Dense-only baseline** (`eval/baselines/dense_baseline.json`):
 
@@ -480,9 +490,11 @@ in the question's `relevant_documents`.
   retrieved chunks, micro-averaged across questions. This is the share of the
   generator's context that the labels do not consider relevant.
 - **Latency**: wall time around `Retriever.retrieve` only — query embedding,
-  vector search, PostgreSQL hydration and clearance filtering — after one
-  untimed warm-up. It excludes ingestion, dataset loading, metric calculation,
-  report rendering and process startup. p50/p95 use the nearest-rank method.
+  vector search, keyword candidate selection and BM25 scoring, PostgreSQL
+  hydration and clearance filtering, whichever of those the configured
+  retriever runs — after one untimed warm-up. It excludes ingestion, dataset
+  loading, metric calculation, report rendering and process startup. p50/p95 use
+  the nearest-rank method.
 
 **Isolation and repeatability.** Each run creates a throwaway tenant and blob
 directory, indexes the corpus with the production chunker, embedder, ids and
@@ -517,6 +529,195 @@ include corpus or configuration changes, not only retrieval changes.
 - **Ingestion is excluded from latency on purpose.** The metric answers "how
   long does a query wait for context?", not "how fast can the worker index a
   document?". Keeping both in one number would make neither actionable.
+
+---
+
+## Hybrid search (Phase 6)
+
+Goal: recover queries dense retrieval misses without giving up semantic recall,
+and measure the change against the Phase 5 baseline. Both retrieval paths use
+the same tenant and clearance predicates, so hybrid search cannot widen what a
+caller is allowed to read.
+
+### Where the BM25 index lives: PostgreSQL
+
+`chunks.content_tsv` is a generated `tsvector` column
+(`to_tsvector('simple', content)`) with a GIN index, added by migration `0003`.
+The database maintains it inside the same transaction that writes the chunk, so
+a rolled-back ingestion leaves no keyword entries behind and no ingestion code
+path can forget to update the index.
+
+The alternatives were rejected for concrete reasons:
+
+- **In-app index.** Would need a second write path, would drift from PostgreSQL
+  on a failed or partially applied ingestion, and would not survive a process
+  restart without a rebuild. Multi-worker deployments would need a shared
+  index anyway, which is a database.
+- **Pinecone sparse vectors.** Keeps one backend, but tenant and clearance
+  filtering move into vector metadata filters, corpus-wide document frequencies
+  are not available cheaply, and the keyword path would only be verifiable
+  against Pinecone Local in this project.
+
+The `simple` configuration is deliberate: it lowercases and splits on non-word
+characters without stemming or stopword removal, so a lexeme is exactly a
+tokenised word. Python tokenises with the same rule (`\w+`), which is what makes
+per-chunk term frequency and per-term document frequency comparable.
+
+### How a keyword query is scored
+
+PostgreSQL selects candidates; BM25 is computed in Python over them.
+
+1. Tokenise the query and deduplicate terms.
+2. Read corpus size and mean `char_count`, plus each term's document frequency,
+   from PostgreSQL — all inside the caller's tenant and clearance scope.
+3. Drop terms that appear in at least half the visible corpus (and in at least
+   two chunks) from *candidate selection*. With OR semantics they would match
+   nearly every chunk and dilute the bounded candidate pool; BM25 already gives
+   them an IDF near zero. If every term is common, the rarest one is kept so the
+   query still produces candidates.
+4. Select at most `RAG_RETRIEVAL_KEYWORD_CANDIDATES` chunks with
+   `content_tsv @@ to_tsquery('simple', ...)`, ordered by `ts_rank`.
+5. Score each candidate with BM25 (`k1=1.5`, `b=0.75`) using term frequencies
+   from Python, document frequencies from PostgreSQL, and `char_count` as the
+   document-length proxy.
+
+Two details are deliberate. `ts_rank` is used only to decide which candidates
+survive the cut — it is not BM25 (no corpus frequency, no length term) and is
+roughly ten times cheaper than `ts_rank_cd`, which buys nothing when BM25
+re-ranks anyway. And `char_count` stands in for token count: it reuses a column
+ingestion already writes instead of adding one that would need a backfill.
+
+### Fusion
+
+Both paths run concurrently with `asyncio.gather`, each asked for
+`max(top_k * 3, 20)` candidates. Results are merged with weighted reciprocal
+rank fusion:
+
+```
+score(chunk) = Σ_paths weight_path / (k + rank_path)
+```
+
+Ranks, not scores, are fused: a cosine similarity and a BM25 score live on
+unrelated scales, and normalising them would make the weights depend on the
+result set. A zero weight removes that path from the fan-out entirely. Ties are
+broken by document title, chunk index, content and chunk id, so metrics do not
+drift between runs. `min_score` is forwarded to the dense path only; it is a
+similarity floor and would discard every BM25 result if applied to it.
+
+### Filtering
+
+| Concern | Dense path | Keyword path |
+| --- | --- | --- |
+| Tenant | vector namespace + `chunks.tenant_id` | `chunks.tenant_id` |
+| Clearance | vector metadata + `chunks.access_level` | `chunks.access_level` |
+| Score floor | cosine `min_score` | not applicable |
+
+The keyword path filters once, in the query that selects candidates. Its corpus
+statistics are computed in the same visible scope: using the whole table would
+let restricted chunks shift the score of chunks a caller can read, which leaks
+their existence. The cost is that BM25 scores are not comparable across
+clearance levels — intentional, because comparing them would leak the same
+information.
+
+### Result: hybrid versus the dense-only baseline
+
+Committed report: `eval/reports/hybrid_vs_dense.md` (JSON alongside it). Same
+dataset fingerprint (`8a0bf1e6…`), same chunking, same deterministic embedder,
+`top_k=5`, `min_score=0.0`, weights `1.0 / 1.0`, `k=60`.
+
+| Metric | Dense baseline | Hybrid | Δ |
+| --- | ---: | ---: | ---: |
+| Recall@5 | 0.9524 | **1.0000** | +0.0476 |
+| Precision@5 | 0.2619 | **0.3429** | +0.0810 |
+| MRR | 0.6865 | **0.9095** | +0.2230 |
+| Hit rate | 0.9524 | **1.0000** | +0.0476 |
+| Irrelevant-context rate | 0.7381 | **0.6571** | −0.0810 |
+| Latency p50 | 8.18 ms | 24.56 ms | +16.38 ms |
+| Latency p95 | 14.04 ms | 35.02 ms | +20.98 ms |
+
+Hybrid retrieval fixes both dense misses (`faq-01` and `faq-04`, both on the
+customer FAQ) and moves the first relevant chunk from median rank ~1.5 to ~1.1.
+Quality metrics are reproducible with the deterministic embedder; latency is
+not. On the local Docker host, p50 across repeated runs ranged from roughly 20
+to 30 ms (and dense from 8 to 9 ms), so treat the latency delta as "roughly two
+to three times", not a precise multiplier. The cause is explained under
+trade-offs.
+
+The report warns that the baseline configuration differs. That is the point:
+the delta measures the retriever change, and the report says so rather than
+presenting it as a like-for-like comparison.
+
+**Weights are tunable, but not tuned on the test set.** A sweep on the same 42
+questions:
+
+| Dense : keyword | Recall@5 | Precision@5 | MRR | Irrelevant-context |
+| --- | ---: | ---: | ---: | ---: |
+| 1 : 1 (default) | 1.0000 | 0.3429 | 0.9095 | 0.6571 |
+| 2 : 1 | 0.9762 | 0.3143 | 0.8651 | 0.6857 |
+| 1 : 2 | 1.0000 | 0.3476 | 0.9393 | 0.6524 |
+| 3 : 1 | 0.9762 | 0.3048 | 0.8333 | 0.6952 |
+| 1 : 3 | 0.9762 | 0.3524 | 0.9333 | 0.6476 |
+
+Keyword-heavier weighting scores slightly better here, but with 42 questions
+that gap is not distinguishable from noise. The default stays neutral at 1:1
+and the knob is exposed for a corpus that justifies tuning.
+
+### Reproducing
+
+```bash
+# Phase 6 comparison: hybrid run against the saved dense baseline.
+RAG_DATABASE_URL=postgresql+asyncpg://rag:rag_dev_password@localhost:55432/rag \
+RAG_VECTOR_STORE=memory RAG_EMBEDDING_PROVIDER=deterministic \
+RAG_EMBEDDING_DIMENSIONS=256 make eval
+
+# Dense-only, to confirm the Phase 5 baseline still reproduces.
+make eval EVAL_ARGS="--retriever dense"
+
+# Compare against the hybrid anchor instead (regression testing Phase 6 itself).
+make eval EVAL_ARGS="--baseline eval/baselines/hybrid_baseline.json"
+
+# Weight and fusion experiments.
+make eval EVAL_ARGS="--dense-weight 1.0 --keyword-weight 2.0 --rrf-k 60"
+```
+
+`make` defaults to the ambient `python3`, which is often not the interpreter
+that has `rag_engine` installed. With the project virtualenv present but not
+active, pass it explicitly: `make eval PYTHON=.venv/bin/python`. The same
+applies to every `make eval` command above.
+
+### Phase 6 trade-offs
+
+- **No stemming.** `simple` keeps Python and PostgreSQL tokenisation identical,
+  but "rollback" and "roll back" are different lexemes. A stemmed
+  configuration would match more, and would then need the same stemmer in
+  Python for term frequency — or PostgreSQL would have to compute term
+  frequency, and `tsvector_to_array` discards positions and repeats. Matching
+  behaviour beat extra recall for this phase.
+- **BM25 is exact only inside the candidate pool.** With more than
+  `RAG_RETRIEVAL_KEYWORD_CANDIDATES` matches, the cut is decided by `ts_rank`,
+  a cheaper heuristic. The default of 200 is far above `top_k=5` on the
+  evaluation corpus, so the evaluation never exercises the cut; a large tenant
+  would.
+- **`char_count` is a length proxy, not a token count.** It is already stored
+  and maintained, which avoided a migration and a backfill. A chunk with many
+  short words is treated as longer than it is.
+- **Hybrid latency is roughly 2–3× dense.** Two backends, three extra
+  PostgreSQL round trips for the keyword path, and a 3× candidate overfetch per
+  path. On the local Docker host the two paths also contend for database CPU,
+  so the parallel fan-out hides less than it would with headroom. The
+  alternative — a keyword-only path for identifier queries — would need a
+  query classifier this phase does not have.
+- **RRF throws away score magnitude.** A chunk that is a near-perfect dense
+  match and one that barely made the top 20 contribute the same at a given
+  rank. That is the price of not calibrating two unrelated scales; a
+  score-fusion experiment would need per-backend normalisation and its own
+  baseline.
+- **Scores in `per_question` are fused RRF scores.** They are useful for
+  ordering and for spotting rank changes, not for thresholding. The report
+  states this so a future reader does not compare them with cosine values.
+- **Corpus statistics are clearance-scoped.** Two users with different
+  clearances get different BM25 scores for the same chunk. That is the
+  deliberate choice over leaking the existence of restricted documents.
 
 ---
 
@@ -608,5 +809,5 @@ make test
 | 3 | Embeddings + Pinecone, tenant namespaces, consistent reindex/delete ✅ |
 | 4 | Dense retrieval with clearance filters, grounded generation, citations ✅ |
 | 5 | Evaluation harness: labeled corpus, recall/MRR/precision, latency, saved dense baseline ✅ |
-| 6 | Guardrails and access-control enforcement |
-| 7 | Hybrid retrieval and re-ranking, measured against the Phase 5 baseline |
+| 6 | Hybrid retrieval: PostgreSQL BM25 index, parallel fan-out, weighted RRF, measured vs Phase 5 ✅ |
+| 7 | Guardrails and access-control enforcement |

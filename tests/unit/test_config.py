@@ -5,7 +5,13 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from rag_engine.core.config import Environment, LogFormat, Settings, get_settings
+from rag_engine.core.config import (
+    Environment,
+    LogFormat,
+    RetrievalMode,
+    Settings,
+    get_settings,
+)
 
 
 def test_defaults_are_local_and_structured() -> None:
@@ -147,3 +153,33 @@ def test_openai_requires_api_key() -> None:
 def test_pinecone_requires_api_key() -> None:
     with pytest.raises(ValidationError, match="pinecone_api_key is required"):
         Settings(vector_store="pinecone", _env_file=None)
+
+
+def test_hybrid_retrieval_defaults_are_neutral_and_bounded() -> None:
+    settings = Settings(_env_file=None)
+
+    assert settings.retrieval_mode is RetrievalMode.HYBRID
+    assert settings.hybrid_dense_weight == 1.0
+    assert settings.hybrid_keyword_weight == 1.0
+    assert settings.hybrid_rrf_k == 60
+    assert settings.retrieval_keyword_candidates == 200
+
+
+def test_fusion_weights_cannot_both_be_zero() -> None:
+    with pytest.raises(ValidationError, match="cannot both be zero"):
+        Settings(hybrid_dense_weight=0.0, hybrid_keyword_weight=0.0, _env_file=None)
+
+
+def test_dense_mode_is_still_selectable() -> None:
+    settings = Settings(retrieval_mode="dense", _env_file=None)
+
+    assert settings.retrieval_mode is RetrievalMode.DENSE
+
+
+def test_fusion_settings_are_bounded() -> None:
+    with pytest.raises(ValidationError):
+        Settings(hybrid_dense_weight=-1.0, _env_file=None)
+    with pytest.raises(ValidationError):
+        Settings(hybrid_rrf_k=0, _env_file=None)
+    with pytest.raises(ValidationError):
+        Settings(retrieval_keyword_candidates=0, _env_file=None)

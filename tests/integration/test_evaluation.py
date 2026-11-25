@@ -12,6 +12,7 @@ from rag_engine.core.models import Tenant
 from rag_engine.evaluation import harness
 from rag_engine.evaluation.dataset import EvalDataset
 from rag_engine.evaluation.harness import EvaluationError, evaluate_dataset
+from rag_engine.evaluation.report import render_markdown
 
 pytestmark = pytest.mark.integration
 
@@ -199,3 +200,64 @@ async def test_run_evaluation_builds_its_own_clients(test_settings: Any, tmp_pat
 
     assert report.dataset.question_count == 3
     assert report.metrics.hit_rate == 1.0
+
+
+def _variant(test_settings: Any, **updates: Any) -> Any:
+    return type(test_settings).model_validate({**test_settings.model_dump(), **updates})
+
+
+async def test_hybrid_report_records_fusion_and_compares_with_dense(
+    test_settings: Any,
+    database: Any,
+    vector_store: Any,
+    embedder: Any,
+) -> None:
+    dataset = _dataset()
+    dense = await evaluate_dataset(
+        dataset,
+        settings=_variant(test_settings, retrieval_mode="dense"),
+        database=database,
+        vector_store=vector_store,
+        embedder=embedder,
+        top_k=2,
+    )
+    hybrid = await evaluate_dataset(
+        dataset,
+        settings=_variant(
+            test_settings,
+            retrieval_mode="hybrid",
+            hybrid_dense_weight=1.0,
+            hybrid_keyword_weight=1.0,
+            hybrid_rrf_k=60,
+            retrieval_keyword_candidates=200,
+        ),
+        database=database,
+        vector_store=vector_store,
+        embedder=embedder,
+        top_k=2,
+        baseline=dense,
+    )
+
+    # A dense run stays comparable with the Phase 5 baseline: no fusion fields.
+    assert dense.config.retriever == "dense"
+    assert dense.config.hybrid_dense_weight is None
+    assert dense.config.keyword_candidates is None
+
+    assert hybrid.config.retriever == "hybrid"
+    assert hybrid.config.hybrid_dense_weight == 1.0
+    assert hybrid.config.hybrid_keyword_weight == 1.0
+    assert hybrid.config.hybrid_rrf_k == 60
+    assert hybrid.config.keyword_candidates == 200
+
+    # The comparison is against a different retriever on purpose; the report
+    # has to say so rather than presenting it as like-for-like.
+    assert any("baseline configuration differs" in warning for warning in hybrid.warnings)
+    assert any("baseline used retriever 'dense'" in warning for warning in hybrid.warnings)
+    assert hybrid.metrics.hit_rate == 1.0
+    assert hybrid.metrics.recall_at_k == pytest.approx(1.0)
+
+    markdown = render_markdown(hybrid)
+    assert "- Retriever: hybrid" in markdown
+    assert "Fusion: weighted reciprocal rank fusion" in markdown
+    assert "keyword candidates: 200" in markdown
+    assert "| Baseline |" in markdown

@@ -82,6 +82,33 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--min-score", type=float, default=None, help="override the retrieval score floor"
     )
     evaluate.add_argument(
+        "--retriever",
+        choices=("dense", "hybrid"),
+        default=None,
+        help="override the retrieval mode (default: RAG_RETRIEVAL_MODE)",
+    )
+    evaluate.add_argument(
+        "--dense-weight",
+        type=float,
+        default=None,
+        help="override the dense weight used by reciprocal rank fusion",
+    )
+    evaluate.add_argument(
+        "--keyword-weight",
+        type=float,
+        default=None,
+        help="override the keyword (BM25) weight used by reciprocal rank fusion",
+    )
+    evaluate.add_argument(
+        "--rrf-k", type=int, default=None, help="override the reciprocal rank fusion constant"
+    )
+    evaluate.add_argument(
+        "--keyword-candidates",
+        type=int,
+        default=None,
+        help="override how many PostgreSQL full-text candidates BM25 re-ranks",
+    )
+    evaluate.add_argument(
         "--baseline",
         type=Path,
         default=None,

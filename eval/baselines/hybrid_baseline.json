@@ -1,0 +1,1720 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-11-25T17:23:41.974885Z",
+  "dataset": {
+    "name": "enterprise-baseline",
+    "version": 1,
+    "fingerprint": "8a0bf1e6a64673537b3942127c465b1a1fa6c9ac0989a42ebc401ca06302351a",
+    "document_count": 10,
+    "chunk_count": 50,
+    "question_count": 42
+  },
+  "config": {
+    "retriever": "hybrid",
+    "embedding_provider": "deterministic",
+    "embedding_dimensions": 256,
+    "chunk_size_chars": 1200,
+    "chunk_overlap_chars": 200,
+    "vector_store": "memory",
+    "top_k": 5,
+    "min_score": 0.0,
+    "keyword_candidates": 200,
+    "hybrid_dense_weight": 1.0,
+    "hybrid_keyword_weight": 1.0,
+    "hybrid_rrf_k": 60
+  },
+  "metrics": {
+    "recall_at_k": 1.0,
+    "precision_at_k": 0.34285714285714286,
+    "mrr": 0.9095238095238096,
+    "hit_rate": 1.0,
+    "irrelevant_context_rate": 0.6571428571428571,
+    "latency_p50_ms": 25.44101899911766,
+    "latency_p95_ms": 50.14837599810562,
+    "latency_mean_ms": 28.567639881137957
+  },
+  "per_question": [
+    {
+      "question_id": "deploy-01",
+      "question": "How do I roll back a failed Kubernetes deployment?",
+      "expected_documents": [
+        "deployment-runbook"
+      ],
+      "retrieved": [
+        {
+          "document_key": "deployment-runbook",
+          "chunk_index": 3,
+          "score": 0.03278688524590164
+        },
+        {
+          "document_key": "deployment-runbook",
+          "chunk_index": 0,
+          "score": 0.031754032258064516
+        },
+        {
+          "document_key": "data-retention-policy",
+          "chunk_index": 4,
+          "score": 0.029957522915269395
+        },
+        {
+          "document_key": "api-reference",
+          "chunk_index": 3,
+          "score": 0.028438886647841874
+        },
+        {
+          "document_key": "architecture-overview",
+          "chunk_index": 1,
+          "score": 0.016129032258064516
+        }
+      ],
+      "relevant_retrieved": 2,
+      "recall": 1.0,
+      "precision": 0.4,
+      "reciprocal_rank": 1.0,
+      "irrelevant_context_rate": 0.6,
+      "latency_ms": 22.080320999521064
+    },
+    {
+      "question_id": "deploy-02",
+      "question": "What percentage of traffic goes to the canary pool?",
+      "expected_documents": [
+        "deployment-runbook"
+      ],
+      "retrieved": [
+        {
+          "document_key": "deployment-runbook",
+          "chunk_index": 2,
+          "score": 0.03278688524590164
+        },
+        {
+          "document_key": "deployment-runbook",
+          "chunk_index": 1,
+          "score": 0.03225806451612903
+        },
+        {
+          "document_key": "support-escalation",
+          "chunk_index": 2,
+          "score": 0.030309988518943745
+        },
+        {
+          "document_key": "customer-faq",
+          "chunk_index": 3,
+          "score": 0.029957522915269395
+        },
+        {
+          "document_key": "customer-faq",
+          "chunk_index": 4,
+          "score": 0.028309409888357256
+        }
+      ],
+      "relevant_retrieved": 2,
+      "recall": 1.0,
+      "precision": 0.4,
+      "reciprocal_rank": 1.0,
+      "irrelevant_context_rate": 0.6,
+      "latency_ms": 27.58463400095934
+    },
+    {
+      "question_id": "deploy-03",
+      "question": "Which metrics trigger an automatic rollback?",
+      "expected_documents": [
+        "deployment-runbook"
+      ],
+      "retrieved": [
+        {
+          "document_key": "deployment-runbook",
+          "chunk_index": 3,
+          "score": 0.03278688524590164
+        },
+        {
+          "document_key": "data-retention-policy",
+          "chunk_index": 4,
+          "score": 0.0315136476426799
+        },
+        {
+          "document_key": "security-policy",
+          "chunk_index": 2,
+          "score": 0.031009615384615385
+        },
+        {
+          "document_key": "api-reference",
+          "chunk_index": 3,
+          "score": 0.02904040404040404
+        },
+        {
+          "document_key": "customer-faq",
+          "chunk_index": 2,
+          "score": 0.028438886647841874
+        }
+      ],
+      "relevant_retrieved": 1,
+      "recall": 1.0,
+      "precision": 0.2,
+      "reciprocal_rank": 1.0,
+      "irrelevant_context_rate": 0.8,
+      "latency_ms": 22.078833000705345
+    },
+    {
+      "question_id": "deploy-04",
+      "question": "Which command checks pod health after a deploy?",
+      "expected_documents": [
+        "deployment-runbook"
+      ],
+      "retrieved": [
+        {
+          "document_key": "deployment-runbook",
+          "chunk_index": 3,
+          "score": 0.0315136476426799
+        },
+        {
+          "document_key": "data-retention-policy",
+          "chunk_index": 3,
+          "score": 0.028782894736842105
+        },
+        {
+          "document_key": "architecture-overview",
+          "chunk_index": 4,
+          "score": 0.028205128205128206
+        },
+        {
+          "document_key": "customer-faq",
+          "chunk_index": 2,
+          "score": 0.028006267136701922
+        },
+        {
+          "document_key": "customer-faq",
+          "chunk_index": 4,
+          "score": 0.027912386121341344
+        }
+      ],
+      "relevant_retrieved": 1,
+      "recall": 1.0,
+      "precision": 0.2,
+      "reciprocal_rank": 1.0,
+      "irrelevant_context_rate": 0.8,
+      "latency_ms": 29.175876999943284
+    },
+    {
+      "question_id": "deploy-05",
+      "question": "How long is the rollback window after full rollout?",
+      "expected_documents": [
+        "deployment-runbook"
+      ],
+      "retrieved": [
+        {
+          "document_key": "deployment-runbook",
+          "chunk_index": 3,
+          "score": 0.03278688524590164
+        },
+        {
+          "document_key": "support-escalation",
+          "chunk_index": 1,
+          "score": 0.031754032258064516
+        },
+        {
+          "document_key": "support-escalation",
+          "chunk_index": 2,
+          "score": 0.03076923076923077
+        },
+        {
+          "document_key": "release-process",
+          "chunk_index": 4,
+          "score": 0.03055037313432836
+        },
+        {
+          "document_key": "deployment-runbook",
+          "chunk_index": 2,
+          "score": 0.03021353930031804
+        }
+      ],
+      "relevant_retrieved": 2,
+      "recall": 1.0,
+      "precision": 0.4,
+      "reciprocal_rank": 1.0,
+      "irrelevant_context_rate": 0.6,
+      "latency_ms": 31.012843999633333
+    },
+    {
+      "question_id": "security-01",
+      "question": "How often must employees rotate their passwords?",
+      "expected_documents": [
+        "security-policy"
+      ],
+      "retrieved": [
+        {
+          "document_key": "onboarding-guide",
+          "chunk_index": 4,
+          "score": 0.032018442622950824
+        },
+        {
+          "document_key": "security-policy",
+          "chunk_index": 4,
+          "score": 0.03200204813108039
+        },
+        {
+          "document_key": "security-policy",
+          "chunk_index": 1,
+          "score": 0.031544957774465976
+        },
+        {
+          "document_key": "security-policy",
+          "chunk_index": 2,
+          "score": 0.03128054740957967
+        },
+        {
+          "document_key": "onboarding-guide",
+          "chunk_index": 1,
+          "score": 0.02967032967032967
+        }
+      ],
+      "relevant_retrieved": 3,
+      "recall": 1.0,
+      "precision": 0.6,
+      "reciprocal_rank": 0.5,
+      "irrelevant_context_rate": 0.4,
+      "latency_ms": 62.01461000091513
+    },
+    {
+      "question_id": "security-02",
+      "question": "What should I do if my laptop is lost or stolen?",
+      "expected_documents": [
+        "security-policy"
+      ],
+      "retrieved": [
+        {
+          "document_key": "security-policy",
+          "chunk_index": 3,
+          "score": 0.032018442622950824
+        },
+        {
+          "document_key": "support-escalation",
+          "chunk_index": 1,
+          "score": 0.03131881575727918
+        },
+        {
+          "document_key": "security-policy",
+          "chunk_index": 2,
+          "score": 0.03021353930031804
+        },
+        {
+          "document_key": "deployment-runbook",
+          "chunk_index": 3,
+          "score": 0.02967032967032967
+        },
+        {
+          "document_key": "customer-faq",
+          "chunk_index": 1,
+          "score": 0.028083267871170464
+        }
+      ],
+      "relevant_retrieved": 2,
+      "recall": 1.0,
+      "precision": 0.4,
+      "reciprocal_rank": 1.0,
+      "irrelevant_context_rate": 0.6,
+      "latency_ms": 14.668067000457086
+    },
+    {
+      "question_id": "security-03",
+      "question": "Which encryption standard protects data at rest?",
+      "expected_documents": [
+        "security-policy"
+      ],
+      "retrieved": [
+        {
+          "document_key": "security-policy",
+          "chunk_index": 2,
+          "score": 0.03278688524590164
+        },
+        {
+          "document_key": "data-retention-policy",
+          "chunk_index": 0,
+          "score": 0.03149801587301587
+        },
+        {
+          "document_key": "data-retention-policy",
+          "chunk_index": 4,
+          "score": 0.0304147465437788
+        },
+        {
+          "document_key": "onboarding-guide",
+          "chunk_index": 3,
+          "score": 0.02967032967032967
+        },
+        {
+          "document_key": "customer-faq",
+          "chunk_index": 4,
+          "score": 0.028782894736842105
+        }
+      ],
+      "relevant_retrieved": 1,
+      "recall": 1.0,
+      "precision": 0.2,
+      "reciprocal_rank": 1.0,
+      "irrelevant_context_rate": 0.8,
+      "latency_ms": 19.27450199946179
+    },
+    {
+      "question_id": "security-04",
+      "question": "Are hardware security keys required for production access?",
+      "expected_documents": [
+        "security-policy"
+      ],
+      "retrieved": [
+        {
+          "document_key": "security-policy",
+          "chunk_index": 1,
+          "score": 0.03278688524590164
+        },
+        {
+          "document_key": "data-retention-policy",
+          "chunk_index": 2,
+          "score": 0.03225806451612903
+        },
+        {
+          "document_key": "security-policy",
+          "chunk_index": 4,
+          "score": 0.031746031746031744
+        },
+        {
+          "document_key": "customer-faq",
+          "chunk_index": 2,
+          "score": 0.03055037313432836
+        },
+        {
+          "document_key": "security-policy",
+          "chunk_index": 0,
+          "score": 0.030090497737556562
+        }
+      ],
+      "relevant_retrieved": 3,
+      "recall": 1.0,
+      "precision": 0.6,
+      "reciprocal_rank": 1.0,
+      "irrelevant_context_rate": 0.4,
+      "latency_ms": 27.82004999971832
+    },
+    {
+      "question_id": "onboarding-01",
+      "question": "What should a new hire do on their first day?",
+      "expected_documents": [
+        "onboarding-guide"
+      ],
+      "retrieved": [
+        {
+          "document_key": "onboarding-guide",
+          "chunk_index": 1,
+          "score": 0.032018442622950824
+        },
+        {
+          "document_key": "security-policy",
+          "chunk_index": 4,
+          "score": 0.031054405392392875
+        },
+        {
+          "document_key": "security-policy",
+          "chunk_index": 3,
+          "score": 0.030776515151515152
+        },
+        {
+          "document_key": "expense-policy",
+          "chunk_index": 2,
+          "score": 0.028381642512077296
+        },
+        {
+          "document_key": "customer-faq",
+          "chunk_index": 3,
+          "score": 0.028258706467661692
+        }
+      ],
+      "relevant_retrieved": 1,
+      "recall": 1.0,
+      "precision": 0.2,
+      "reciprocal_rank": 1.0,
+      "irrelevant_context_rate": 0.8,
+      "latency_ms": 20.627008998417296
+    },
+    {
+      "question_id": "onboarding-02",
+      "question": "Who is assigned as a buddy during onboarding?",
+      "expected_documents": [
+        "onboarding-guide"
+      ],
+      "retrieved": [
+        {
+          "document_key": "support-escalation",
+          "chunk_index": 1,
+          "score": 0.03252247488101534
+        },
+        {
+          "document_key": "onboarding-guide",
+          "chunk_index": 2,
+          "score": 0.03177805800756621
+        },
+        {
+          "document_key": "expense-policy",
+          "chunk_index": 2,
+          "score": 0.031054405392392875
+        },
+        {
+          "document_key": "customer-faq",
+          "chunk_index": 4,
+          "score": 0.030330882352941176
+        },
+        {
+          "document_key": "onboarding-guide",
+          "chunk_index": 0,
+          "score": 0.029957522915269395
+        }
+      ],
+      "relevant_retrieved": 2,
+      "recall": 1.0,
+      "precision": 0.4,
+      "reciprocal_rank": 0.5,
+      "irrelevant_context_rate": 0.6,
+      "latency_ms": 28.300767997279763
+    },
+    {
+      "question_id": "onboarding-03",
+      "question": "Which accounts are provisioned before the start date?",
+      "expected_documents": [
+        "onboarding-guide"
+      ],
+      "retrieved": [
+        {
+          "document_key": "onboarding-guide",
+          "chunk_index": 1,
+          "score": 0.03278688524590164
+        },
+        {
+          "document_key": "security-policy",
+          "chunk_index": 1,
+          "score": 0.03149801587301587
+        },
+        {
+          "document_key": "deployment-runbook",
+          "chunk_index": 1,
+          "score": 0.030536130536130537
+        },
+        {
+          "document_key": "release-process",
+          "chunk_index": 2,
+          "score": 0.02946912242686891
+        },
+        {
+          "document_key": "api-reference",
+          "chunk_index": 2,
+          "score": 0.029437229437229435
+        }
+      ],
+      "relevant_retrieved": 1,
+      "recall": 1.0,
+      "precision": 0.2,
+      "reciprocal_rank": 1.0,
+      "irrelevant_context_rate": 0.8,
+      "latency_ms": 22.761232998163905
+    },
+    {
+      "question_id": "onboarding-04",
+      "question": "What equipment is shipped to remote employees?",
+      "expected_documents": [
+        "onboarding-guide"
+      ],
+      "retrieved": [
+        {
+          "document_key": "security-policy",
+          "chunk_index": 2,
+          "score": 0.032018442622950824
+        },
+        {
+          "document_key": "onboarding-guide",
+          "chunk_index": 4,
+          "score": 0.03177805800756621
+        },
+        {
+          "document_key": "security-policy",
+          "chunk_index": 4,
+          "score": 0.030621785881252923
+        },
+        {
+          "document_key": "support-escalation",
+          "chunk_index": 1,
+          "score": 0.030158730158730156
+        },
+        {
+          "document_key": "data-retention-policy",
+          "chunk_index": 1,
+          "score": 0.029418126757516764
+        }
+      ],
+      "relevant_retrieved": 1,
+      "recall": 1.0,
+      "precision": 0.2,
+      "reciprocal_rank": 0.5,
+      "irrelevant_context_rate": 0.8,
+      "latency_ms": 18.098476000886876
+    },
+    {
+      "question_id": "api-01",
+      "question": "How does API authentication work for service clients?",
+      "expected_documents": [
+        "api-reference"
+      ],
+      "retrieved": [
+        {
+          "document_key": "api-reference",
+          "chunk_index": 1,
+          "score": 0.032018442622950824
+        },
+        {
+          "document_key": "security-policy",
+          "chunk_index": 1,
+          "score": 0.0304147465437788
+        },
+        {
+          "document_key": "release-process",
+          "chunk_index": 2,
+          "score": 0.02964254577157803
+        },
+        {
+          "document_key": "release-process",
+          "chunk_index": 3,
+          "score": 0.029083245521601686
+        },
+        {
+          "document_key": "expense-policy",
+          "chunk_index": 4,
+          "score": 0.02900988017658188
+        }
+      ],
+      "relevant_retrieved": 1,
+      "recall": 1.0,
+      "precision": 0.2,
+      "reciprocal_rank": 1.0,
+      "irrelevant_context_rate": 0.8,
+      "latency_ms": 20.94507999936468
+    },
+    {
+      "question_id": "api-02",
+      "question": "What is the maximum page size for list endpoints?",
+      "expected_documents": [
+        "api-reference"
+      ],
+      "retrieved": [
+        {
+          "document_key": "api-reference",
+          "chunk_index": 2,
+          "score": 0.03278688524590164
+        },
+        {
+          "document_key": "support-escalation",
+          "chunk_index": 3,
+          "score": 0.0315136476426799
+        },
+        {
+          "document_key": "customer-faq",
+          "chunk_index": 1,
+          "score": 0.03125
+        },
+        {
+          "document_key": "support-escalation",
+          "chunk_index": 1,
+          "score": 0.030309988518943745
+        },
+        {
+          "document_key": "expense-policy",
+          "chunk_index": 2,
+          "score": 0.029827662395050816
+        }
+      ],
+      "relevant_retrieved": 1,
+      "recall": 1.0,
+      "precision": 0.2,
+      "reciprocal_rank": 1.0,
+      "irrelevant_context_rate": 0.8,
+      "latency_ms": 29.738614000962116
+    },
+    {
+      "question_id": "api-03",
+      "question": "Which status code indicates rate limiting?",
+      "expected_documents": [
+        "api-reference"
+      ],
+      "retrieved": [
+        {
+          "document_key": "api-reference",
+          "chunk_index": 3,
+          "score": 0.03278688524590164
+        },
+        {
+          "document_key": "customer-faq",
+          "chunk_index": 1,
+          "score": 0.0315136476426799
+        },
+        {
+          "document_key": "support-escalation",
+          "chunk_index": 3,
+          "score": 0.030834914611005692
+        },
+        {
+          "document_key": "deployment-runbook",
+          "chunk_index": 3,
+          "score": 0.03057889822595705
+        },
+        {
+          "document_key": "architecture-overview",
+          "chunk_index": 3,
+          "score": 0.03007688828584351
+        }
+      ],
+      "relevant_retrieved": 1,
+      "recall": 1.0,
+      "precision": 0.2,
+      "reciprocal_rank": 1.0,
+      "irrelevant_context_rate": 0.8,
+      "latency_ms": 23.89675700032967
+    },
+    {
+      "question_id": "api-04",
+      "question": "What happens when an API client exceeds its quota?",
+      "expected_documents": [
+        "api-reference"
+      ],
+      "retrieved": [
+        {
+          "document_key": "api-reference",
+          "chunk_index": 3,
+          "score": 0.03177805800756621
+        },
+        {
+          "document_key": "api-reference",
+          "chunk_index": 0,
+          "score": 0.031544957774465976
+        },
+        {
+          "document_key": "expense-policy",
+          "chunk_index": 2,
+          "score": 0.030798389007344232
+        },
+        {
+          "document_key": "api-reference",
+          "chunk_index": 1,
+          "score": 0.030090497737556562
+        },
+        {
+          "document_key": "deployment-runbook",
+          "chunk_index": 3,
+          "score": 0.02964254577157803
+        }
+      ],
+      "relevant_retrieved": 3,
+      "recall": 1.0,
+      "precision": 0.6,
+      "reciprocal_rank": 1.0,
+      "irrelevant_context_rate": 0.4,
+      "latency_ms": 21.901703999901656
+    },
+    {
+      "question_id": "retention-01",
+      "question": "How long are deleted customer records retained in backups?",
+      "expected_documents": [
+        "data-retention-policy"
+      ],
+      "retrieved": [
+        {
+          "document_key": "data-retention-policy",
+          "chunk_index": 1,
+          "score": 0.03278688524590164
+        },
+        {
+          "document_key": "security-policy",
+          "chunk_index": 2,
+          "score": 0.03149801587301587
+        },
+        {
+          "document_key": "customer-faq",
+          "chunk_index": 0,
+          "score": 0.030798389007344232
+        },
+        {
+          "document_key": "data-retention-policy",
+          "chunk_index": 2,
+          "score": 0.030303030303030304
+        },
+        {
+          "document_key": "customer-faq",
+          "chunk_index": 4,
+          "score": 0.03021353930031804
+        }
+      ],
+      "relevant_retrieved": 2,
+      "recall": 1.0,
+      "precision": 0.4,
+      "reciprocal_rank": 1.0,
+      "irrelevant_context_rate": 0.6,
+      "latency_ms": 34.141489002649905
+    },
+    {
+      "question_id": "retention-02",
+      "question": "What happens when a customer requests erasure of their data?",
+      "expected_documents": [
+        "data-retention-policy"
+      ],
+      "retrieved": [
+        {
+          "document_key": "data-retention-policy",
+          "chunk_index": 1,
+          "score": 0.03200204813108039
+        },
+        {
+          "document_key": "expense-policy",
+          "chunk_index": 2,
+          "score": 0.031544957774465976
+        },
+        {
+          "document_key": "customer-faq",
+          "chunk_index": 0,
+          "score": 0.030117753623188408
+        },
+        {
+          "document_key": "data-retention-policy",
+          "chunk_index": 3,
+          "score": 0.03009207275993712
+        },
+        {
+          "document_key": "security-policy",
+          "chunk_index": 2,
+          "score": 0.029910714285714284
+        }
+      ],
+      "relevant_retrieved": 2,
+      "recall": 1.0,
+      "precision": 0.4,
+      "reciprocal_rank": 1.0,
+      "irrelevant_context_rate": 0.6,
+      "latency_ms": 25.44101899911766
+    },
+    {
+      "question_id": "retention-03",
+      "question": "How long are audit logs kept?",
+      "expected_documents": [
+        "data-retention-policy"
+      ],
+      "retrieved": [
+        {
+          "document_key": "data-retention-policy",
+          "chunk_index": 2,
+          "score": 0.03278688524590164
+        },
+        {
+          "document_key": "architecture-overview",
+          "chunk_index": 4,
+          "score": 0.03225806451612903
+        },
+        {
+          "document_key": "security-policy",
+          "chunk_index": 1,
+          "score": 0.03149801587301587
+        },
+        {
+          "document_key": "data-retention-policy",
+          "chunk_index": 1,
+          "score": 0.030158730158730156
+        },
+        {
+          "document_key": "data-retention-policy",
+          "chunk_index": 4,
+          "score": 0.029418126757516764
+        }
+      ],
+      "relevant_retrieved": 3,
+      "recall": 1.0,
+      "precision": 0.6,
+      "reciprocal_rank": 1.0,
+      "irrelevant_context_rate": 0.4,
+      "latency_ms": 22.90822100258083
+    },
+    {
+      "question_id": "retention-04",
+      "question": "How often are backups restored for verification?",
+      "expected_documents": [
+        "data-retention-policy"
+      ],
+      "retrieved": [
+        {
+          "document_key": "data-retention-policy",
+          "chunk_index": 1,
+          "score": 0.03252247488101534
+        },
+        {
+          "document_key": "security-policy",
+          "chunk_index": 1,
+          "score": 0.031746031746031744
+        },
+        {
+          "document_key": "expense-policy",
+          "chunk_index": 4,
+          "score": 0.03125
+        },
+        {
+          "document_key": "security-policy",
+          "chunk_index": 2,
+          "score": 0.028577260665441927
+        },
+        {
+          "document_key": "architecture-overview",
+          "chunk_index": 2,
+          "score": 0.028381642512077296
+        }
+      ],
+      "relevant_retrieved": 1,
+      "recall": 1.0,
+      "precision": 0.2,
+      "reciprocal_rank": 1.0,
+      "irrelevant_context_rate": 0.8,
+      "latency_ms": 23.899545998574467
+    },
+    {
+      "question_id": "support-01",
+      "question": "What response time is promised for a severity one incident?",
+      "expected_documents": [
+        "support-escalation"
+      ],
+      "retrieved": [
+        {
+          "document_key": "support-escalation",
+          "chunk_index": 1,
+          "score": 0.03278688524590164
+        },
+        {
+          "document_key": "data-retention-policy",
+          "chunk_index": 4,
+          "score": 0.03149801587301587
+        },
+        {
+          "document_key": "deployment-runbook",
+          "chunk_index": 1,
+          "score": 0.030117753623188408
+        },
+        {
+          "document_key": "support-escalation",
+          "chunk_index": 4,
+          "score": 0.029827662395050816
+        },
+        {
+          "document_key": "customer-faq",
+          "chunk_index": 4,
+          "score": 0.029437229437229435
+        }
+      ],
+      "relevant_retrieved": 2,
+      "recall": 1.0,
+      "precision": 0.4,
+      "reciprocal_rank": 1.0,
+      "irrelevant_context_rate": 0.6,
+      "latency_ms": 35.884286000509746
+    },
+    {
+      "question_id": "support-02",
+      "question": "When should an engineer escalate to the on-call manager?",
+      "expected_documents": [
+        "support-escalation"
+      ],
+      "retrieved": [
+        {
+          "document_key": "support-escalation",
+          "chunk_index": 2,
+          "score": 0.03278688524590164
+        },
+        {
+          "document_key": "security-policy",
+          "chunk_index": 3,
+          "score": 0.03225806451612903
+        },
+        {
+          "document_key": "release-process",
+          "chunk_index": 4,
+          "score": 0.031024531024531024
+        },
+        {
+          "document_key": "api-reference",
+          "chunk_index": 3,
+          "score": 0.030776515151515152
+        },
+        {
+          "document_key": "onboarding-guide",
+          "chunk_index": 1,
+          "score": 0.030117753623188408
+        }
+      ],
+      "relevant_retrieved": 1,
+      "recall": 1.0,
+      "precision": 0.2,
+      "reciprocal_rank": 1.0,
+      "irrelevant_context_rate": 0.8,
+      "latency_ms": 23.349487000814406
+    },
+    {
+      "question_id": "support-03",
+      "question": "How often are customer status updates posted during an incident?",
+      "expected_documents": [
+        "support-escalation"
+      ],
+      "retrieved": [
+        {
+          "document_key": "support-escalation",
+          "chunk_index": 3,
+          "score": 0.03177805800756621
+        },
+        {
+          "document_key": "data-retention-policy",
+          "chunk_index": 1,
+          "score": 0.031754032258064516
+        },
+        {
+          "document_key": "customer-faq",
+          "chunk_index": 0,
+          "score": 0.03057889822595705
+        },
+        {
+          "document_key": "deployment-runbook",
+          "chunk_index": 1,
+          "score": 0.03036576949620428
+        },
+        {
+          "document_key": "security-policy",
+          "chunk_index": 2,
+          "score": 0.030330882352941176
+        }
+      ],
+      "relevant_retrieved": 1,
+      "recall": 1.0,
+      "precision": 0.2,
+      "reciprocal_rank": 1.0,
+      "irrelevant_context_rate": 0.8,
+      "latency_ms": 29.528920000302605
+    },
+    {
+      "question_id": "support-04",
+      "question": "When is a postmortem required after an incident?",
+      "expected_documents": [
+        "support-escalation"
+      ],
+      "retrieved": [
+        {
+          "document_key": "support-escalation",
+          "chunk_index": 1,
+          "score": 0.031099324975891997
+        },
+        {
+          "document_key": "expense-policy",
+          "chunk_index": 2,
+          "score": 0.031054405392392875
+        },
+        {
+          "document_key": "customer-faq",
+          "chunk_index": 2,
+          "score": 0.031024531024531024
+        },
+        {
+          "document_key": "data-retention-policy",
+          "chunk_index": 4,
+          "score": 0.031009615384615385
+        },
+        {
+          "document_key": "deployment-runbook",
+          "chunk_index": 3,
+          "score": 0.029877369007803793
+        }
+      ],
+      "relevant_retrieved": 1,
+      "recall": 1.0,
+      "precision": 0.2,
+      "reciprocal_rank": 1.0,
+      "irrelevant_context_rate": 0.8,
+      "latency_ms": 27.393405998736853
+    },
+    {
+      "question_id": "expense-01",
+      "question": "What is the deadline for submitting travel receipts?",
+      "expected_documents": [
+        "expense-policy"
+      ],
+      "retrieved": [
+        {
+          "document_key": "expense-policy",
+          "chunk_index": 4,
+          "score": 0.03200204813108039
+        },
+        {
+          "document_key": "support-escalation",
+          "chunk_index": 1,
+          "score": 0.03125763125763126
+        },
+        {
+          "document_key": "expense-policy",
+          "chunk_index": 1,
+          "score": 0.031099324975891997
+        },
+        {
+          "document_key": "customer-faq",
+          "chunk_index": 1,
+          "score": 0.030834914611005692
+        },
+        {
+          "document_key": "data-retention-policy",
+          "chunk_index": 1,
+          "score": 0.030117753623188408
+        }
+      ],
+      "relevant_retrieved": 2,
+      "recall": 1.0,
+      "precision": 0.4,
+      "reciprocal_rank": 1.0,
+      "irrelevant_context_rate": 0.6,
+      "latency_ms": 24.13735300069675
+    },
+    {
+      "question_id": "expense-02",
+      "question": "What is the hotel cap per night?",
+      "expected_documents": [
+        "expense-policy"
+      ],
+      "retrieved": [
+        {
+          "document_key": "expense-policy",
+          "chunk_index": 1,
+          "score": 0.032018442622950824
+        },
+        {
+          "document_key": "support-escalation",
+          "chunk_index": 2,
+          "score": 0.031099324975891997
+        },
+        {
+          "document_key": "api-reference",
+          "chunk_index": 2,
+          "score": 0.031054405392392875
+        },
+        {
+          "document_key": "customer-faq",
+          "chunk_index": 1,
+          "score": 0.031024531024531024
+        },
+        {
+          "document_key": "architecture-overview",
+          "chunk_index": 3,
+          "score": 0.03076923076923077
+        }
+      ],
+      "relevant_retrieved": 1,
+      "recall": 1.0,
+      "precision": 0.2,
+      "reciprocal_rank": 1.0,
+      "irrelevant_context_rate": 0.8,
+      "latency_ms": 25.053085999388713
+    },
+    {
+      "question_id": "expense-03",
+      "question": "Who approves expenses above one thousand dollars?",
+      "expected_documents": [
+        "expense-policy"
+      ],
+      "retrieved": [
+        {
+          "document_key": "expense-policy",
+          "chunk_index": 3,
+          "score": 0.03278688524590164
+        },
+        {
+          "document_key": "onboarding-guide",
+          "chunk_index": 4,
+          "score": 0.03225806451612903
+        },
+        {
+          "document_key": "expense-policy",
+          "chunk_index": 1,
+          "score": 0.03055037313432836
+        },
+        {
+          "document_key": "expense-policy",
+          "chunk_index": 2,
+          "score": 0.02976190476190476
+        },
+        {
+          "document_key": "support-escalation",
+          "chunk_index": 4,
+          "score": 0.029418126757516764
+        }
+      ],
+      "relevant_retrieved": 3,
+      "recall": 1.0,
+      "precision": 0.6,
+      "reciprocal_rank": 1.0,
+      "irrelevant_context_rate": 0.4,
+      "latency_ms": 20.672834001743468
+    },
+    {
+      "question_id": "expense-04",
+      "question": "What is the daily meal per diem?",
+      "expected_documents": [
+        "expense-policy"
+      ],
+      "retrieved": [
+        {
+          "document_key": "expense-policy",
+          "chunk_index": 2,
+          "score": 0.03278688524590164
+        },
+        {
+          "document_key": "customer-faq",
+          "chunk_index": 1,
+          "score": 0.03225806451612903
+        },
+        {
+          "document_key": "support-escalation",
+          "chunk_index": 1,
+          "score": 0.031024531024531024
+        },
+        {
+          "document_key": "api-reference",
+          "chunk_index": 2,
+          "score": 0.03055037313432836
+        },
+        {
+          "document_key": "architecture-overview",
+          "chunk_index": 3,
+          "score": 0.030309988518943745
+        }
+      ],
+      "relevant_retrieved": 1,
+      "recall": 1.0,
+      "precision": 0.2,
+      "reciprocal_rank": 1.0,
+      "irrelevant_context_rate": 0.8,
+      "latency_ms": 23.011966000922257
+    },
+    {
+      "question_id": "architecture-01",
+      "question": "How do ingestion workers claim asynchronous jobs?",
+      "expected_documents": [
+        "architecture-overview"
+      ],
+      "retrieved": [
+        {
+          "document_key": "architecture-overview",
+          "chunk_index": 2,
+          "score": 0.03278688524590164
+        },
+        {
+          "document_key": "customer-faq",
+          "chunk_index": 3,
+          "score": 0.03225806451612903
+        },
+        {
+          "document_key": "architecture-overview",
+          "chunk_index": 4,
+          "score": 0.031024531024531024
+        },
+        {
+          "document_key": "api-reference",
+          "chunk_index": 3,
+          "score": 0.030330882352941176
+        },
+        {
+          "document_key": "architecture-overview",
+          "chunk_index": 1,
+          "score": 0.02904040404040404
+        }
+      ],
+      "relevant_retrieved": 3,
+      "recall": 1.0,
+      "precision": 0.6,
+      "reciprocal_rank": 1.0,
+      "irrelevant_context_rate": 0.4,
+      "latency_ms": 28.327506999630714
+    },
+    {
+      "question_id": "architecture-02",
+      "question": "Which database stores document metadata and chunk text?",
+      "expected_documents": [
+        "architecture-overview"
+      ],
+      "retrieved": [
+        {
+          "document_key": "architecture-overview",
+          "chunk_index": 3,
+          "score": 0.03278688524590164
+        },
+        {
+          "document_key": "architecture-overview",
+          "chunk_index": 1,
+          "score": 0.03125763125763126
+        },
+        {
+          "document_key": "data-retention-policy",
+          "chunk_index": 2,
+          "score": 0.029116045245077504
+        },
+        {
+          "document_key": "customer-faq",
+          "chunk_index": 4,
+          "score": 0.029030910609857977
+        },
+        {
+          "document_key": "data-retention-policy",
+          "chunk_index": 1,
+          "score": 0.028665028665028666
+        }
+      ],
+      "relevant_retrieved": 2,
+      "recall": 1.0,
+      "precision": 0.4,
+      "reciprocal_rank": 1.0,
+      "irrelevant_context_rate": 0.6,
+      "latency_ms": 28.266345001611626
+    },
+    {
+      "question_id": "architecture-03",
+      "question": "Where is the Redis cache used in the request path?",
+      "expected_documents": [
+        "architecture-overview"
+      ],
+      "retrieved": [
+        {
+          "document_key": "architecture-overview",
+          "chunk_index": 3,
+          "score": 0.032018442622950824
+        },
+        {
+          "document_key": "deployment-runbook",
+          "chunk_index": 4,
+          "score": 0.03131881575727918
+        },
+        {
+          "document_key": "data-retention-policy",
+          "chunk_index": 3,
+          "score": 0.03057889822595705
+        },
+        {
+          "document_key": "expense-policy",
+          "chunk_index": 1,
+          "score": 0.030158730158730156
+        },
+        {
+          "document_key": "onboarding-guide",
+          "chunk_index": 2,
+          "score": 0.029236022193768675
+        }
+      ],
+      "relevant_retrieved": 1,
+      "recall": 1.0,
+      "precision": 0.2,
+      "reciprocal_rank": 1.0,
+      "irrelevant_context_rate": 0.8,
+      "latency_ms": 23.40982200257713
+    },
+    {
+      "question_id": "architecture-04",
+      "question": "What does the readiness check verify?",
+      "expected_documents": [
+        "architecture-overview"
+      ],
+      "retrieved": [
+        {
+          "document_key": "deployment-runbook",
+          "chunk_index": 1,
+          "score": 0.032018442622950824
+        },
+        {
+          "document_key": "architecture-overview",
+          "chunk_index": 4,
+          "score": 0.03177805800756621
+        },
+        {
+          "document_key": "data-retention-policy",
+          "chunk_index": 4,
+          "score": 0.030798389007344232
+        },
+        {
+          "document_key": "deployment-runbook",
+          "chunk_index": 4,
+          "score": 0.0304147465437788
+        },
+        {
+          "document_key": "onboarding-guide",
+          "chunk_index": 1,
+          "score": 0.016129032258064516
+        }
+      ],
+      "relevant_retrieved": 1,
+      "recall": 1.0,
+      "precision": 0.2,
+      "reciprocal_rank": 0.5,
+      "irrelevant_context_rate": 0.8,
+      "latency_ms": 26.988301000528736
+    },
+    {
+      "question_id": "release-01",
+      "question": "What must be included in every changelog entry?",
+      "expected_documents": [
+        "release-process"
+      ],
+      "retrieved": [
+        {
+          "document_key": "release-process",
+          "chunk_index": 1,
+          "score": 0.03278688524590164
+        },
+        {
+          "document_key": "security-policy",
+          "chunk_index": 1,
+          "score": 0.03200204813108039
+        },
+        {
+          "document_key": "release-process",
+          "chunk_index": 2,
+          "score": 0.03128054740957967
+        },
+        {
+          "document_key": "security-policy",
+          "chunk_index": 4,
+          "score": 0.031024531024531024
+        },
+        {
+          "document_key": "architecture-overview",
+          "chunk_index": 4,
+          "score": 0.030090497737556562
+        }
+      ],
+      "relevant_retrieved": 2,
+      "recall": 1.0,
+      "precision": 0.4,
+      "reciprocal_rank": 1.0,
+      "irrelevant_context_rate": 0.6,
+      "latency_ms": 32.06327600128134
+    },
+    {
+      "question_id": "release-02",
+      "question": "When are feature flags removed?",
+      "expected_documents": [
+        "release-process"
+      ],
+      "retrieved": [
+        {
+          "document_key": "data-retention-policy",
+          "chunk_index": 1,
+          "score": 0.03252247488101534
+        },
+        {
+          "document_key": "release-process",
+          "chunk_index": 3,
+          "score": 0.031754032258064516
+        },
+        {
+          "document_key": "security-policy",
+          "chunk_index": 1,
+          "score": 0.030309988518943745
+        },
+        {
+          "document_key": "expense-policy",
+          "chunk_index": 2,
+          "score": 0.0293236301369863
+        },
+        {
+          "document_key": "security-policy",
+          "chunk_index": 4,
+          "score": 0.028790389395194696
+        }
+      ],
+      "relevant_retrieved": 1,
+      "recall": 1.0,
+      "precision": 0.2,
+      "reciprocal_rank": 0.5,
+      "irrelevant_context_rate": 0.8,
+      "latency_ms": 22.814165000454523
+    },
+    {
+      "question_id": "release-03",
+      "question": "Which tests must a release candidate pass?",
+      "expected_documents": [
+        "release-process"
+      ],
+      "retrieved": [
+        {
+          "document_key": "release-process",
+          "chunk_index": 2,
+          "score": 0.03278688524590164
+        },
+        {
+          "document_key": "release-process",
+          "chunk_index": 4,
+          "score": 0.031754032258064516
+        },
+        {
+          "document_key": "release-process",
+          "chunk_index": 0,
+          "score": 0.03149801587301587
+        },
+        {
+          "document_key": "security-policy",
+          "chunk_index": 1,
+          "score": 0.029211087420042643
+        },
+        {
+          "document_key": "deployment-runbook",
+          "chunk_index": 1,
+          "score": 0.028693528693528692
+        }
+      ],
+      "relevant_retrieved": 3,
+      "recall": 1.0,
+      "precision": 0.6,
+      "reciprocal_rank": 1.0,
+      "irrelevant_context_rate": 0.4,
+      "latency_ms": 20.14762500039069
+    },
+    {
+      "question_id": "release-04",
+      "question": "How is the release candidate approved for production?",
+      "expected_documents": [
+        "release-process"
+      ],
+      "retrieved": [
+        {
+          "document_key": "release-process",
+          "chunk_index": 4,
+          "score": 0.03278688524590164
+        },
+        {
+          "document_key": "deployment-runbook",
+          "chunk_index": 1,
+          "score": 0.03225806451612903
+        },
+        {
+          "document_key": "release-process",
+          "chunk_index": 2,
+          "score": 0.03149801587301587
+        },
+        {
+          "document_key": "deployment-runbook",
+          "chunk_index": 4,
+          "score": 0.030309988518943745
+        },
+        {
+          "document_key": "support-escalation",
+          "chunk_index": 1,
+          "score": 0.029273504273504274
+        }
+      ],
+      "relevant_retrieved": 2,
+      "recall": 1.0,
+      "precision": 0.4,
+      "reciprocal_rank": 1.0,
+      "irrelevant_context_rate": 0.6,
+      "latency_ms": 34.34267400007229
+    },
+    {
+      "question_id": "faq-01",
+      "question": "How does annual billing compare to monthly pricing?",
+      "expected_documents": [
+        "customer-faq"
+      ],
+      "retrieved": [
+        {
+          "document_key": "security-policy",
+          "chunk_index": 3,
+          "score": 0.031544957774465976
+        },
+        {
+          "document_key": "customer-faq",
+          "chunk_index": 1,
+          "score": 0.03131881575727918
+        },
+        {
+          "document_key": "customer-faq",
+          "chunk_index": 3,
+          "score": 0.030834914611005692
+        },
+        {
+          "document_key": "security-policy",
+          "chunk_index": 2,
+          "score": 0.030090497737556562
+        },
+        {
+          "document_key": "customer-faq",
+          "chunk_index": 2,
+          "score": 0.029957522915269395
+        }
+      ],
+      "relevant_retrieved": 3,
+      "recall": 1.0,
+      "precision": 0.6,
+      "reciprocal_rank": 0.5,
+      "irrelevant_context_rate": 0.4,
+      "latency_ms": 39.355365002847975
+    },
+    {
+      "question_id": "faq-02",
+      "question": "How can a customer cancel their subscription?",
+      "expected_documents": [
+        "customer-faq"
+      ],
+      "retrieved": [
+        {
+          "document_key": "customer-faq",
+          "chunk_index": 3,
+          "score": 0.032266458495966696
+        },
+        {
+          "document_key": "customer-faq",
+          "chunk_index": 0,
+          "score": 0.03200204813108039
+        },
+        {
+          "document_key": "data-retention-policy",
+          "chunk_index": 1,
+          "score": 0.031754032258064516
+        },
+        {
+          "document_key": "security-policy",
+          "chunk_index": 2,
+          "score": 0.02967032967032967
+        },
+        {
+          "document_key": "security-policy",
+          "chunk_index": 3,
+          "score": 0.02946912242686891
+        }
+      ],
+      "relevant_retrieved": 2,
+      "recall": 1.0,
+      "precision": 0.4,
+      "reciprocal_rank": 1.0,
+      "irrelevant_context_rate": 0.6,
+      "latency_ms": 40.94284199891263
+    },
+    {
+      "question_id": "faq-03",
+      "question": "How do customers export their data?",
+      "expected_documents": [
+        "customer-faq"
+      ],
+      "retrieved": [
+        {
+          "document_key": "customer-faq",
+          "chunk_index": 4,
+          "score": 0.03278688524590164
+        },
+        {
+          "document_key": "data-retention-policy",
+          "chunk_index": 0,
+          "score": 0.03200204813108039
+        },
+        {
+          "document_key": "support-escalation",
+          "chunk_index": 1,
+          "score": 0.030621785881252923
+        },
+        {
+          "document_key": "security-policy",
+          "chunk_index": 2,
+          "score": 0.03055037313432836
+        },
+        {
+          "document_key": "customer-faq",
+          "chunk_index": 3,
+          "score": 0.030536130536130537
+        }
+      ],
+      "relevant_retrieved": 2,
+      "recall": 1.0,
+      "precision": 0.4,
+      "reciprocal_rank": 1.0,
+      "irrelevant_context_rate": 0.6,
+      "latency_ms": 41.19984999852022
+    },
+    {
+      "question_id": "faq-04",
+      "question": "How long does a customer have to dispute an invoice?",
+      "expected_documents": [
+        "customer-faq"
+      ],
+      "retrieved": [
+        {
+          "document_key": "onboarding-guide",
+          "chunk_index": 4,
+          "score": 0.031099324975891997
+        },
+        {
+          "document_key": "architecture-overview",
+          "chunk_index": 4,
+          "score": 0.030798389007344232
+        },
+        {
+          "document_key": "data-retention-policy",
+          "chunk_index": 1,
+          "score": 0.03057889822595705
+        },
+        {
+          "document_key": "data-retention-policy",
+          "chunk_index": 4,
+          "score": 0.030117753623188408
+        },
+        {
+          "document_key": "customer-faq",
+          "chunk_index": 0,
+          "score": 0.03007688828584351
+        }
+      ],
+      "relevant_retrieved": 1,
+      "recall": 1.0,
+      "precision": 0.2,
+      "reciprocal_rank": 0.2,
+      "irrelevant_context_rate": 0.8,
+      "latency_ms": 50.14837599810562
+    },
+    {
+      "question_id": "faq-05",
+      "question": "How long is data available for export after cancellation?",
+      "expected_documents": [
+        "customer-faq"
+      ],
+      "retrieved": [
+        {
+          "document_key": "customer-faq",
+          "chunk_index": 4,
+          "score": 0.03278688524590164
+        },
+        {
+          "document_key": "support-escalation",
+          "chunk_index": 1,
+          "score": 0.03200204813108039
+        },
+        {
+          "document_key": "data-retention-policy",
+          "chunk_index": 0,
+          "score": 0.03128054740957967
+        },
+        {
+          "document_key": "security-policy",
+          "chunk_index": 2,
+          "score": 0.031009615384615385
+        },
+        {
+          "document_key": "deployment-runbook",
+          "chunk_index": 3,
+          "score": 0.03036576949620428
+        }
+      ],
+      "relevant_retrieved": 1,
+      "recall": 1.0,
+      "precision": 0.2,
+      "reciprocal_rank": 1.0,
+      "irrelevant_context_rate": 0.8,
+      "latency_ms": 54.43373500020243
+    }
+  ],
+  "comparison": [],
+  "warnings": []
+}

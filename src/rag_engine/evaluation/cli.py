@@ -63,13 +63,36 @@ def _write(path: Path, content: str) -> None:
     path.write_text(content, encoding="utf-8")
 
 
+def _apply_overrides(settings: Settings, args: argparse.Namespace) -> Settings:
+    """Return settings with CLI overrides applied and validated.
+
+    ``model_copy`` would bypass the cross-field checks (a zero-weight pair, for
+    example), so the merged values are validated as a fresh ``Settings``.
+    """
+    updates: dict[str, object] = {}
+    if args.retriever is not None:
+        updates["retrieval_mode"] = args.retriever
+    if args.dense_weight is not None:
+        updates["hybrid_dense_weight"] = args.dense_weight
+    if args.keyword_weight is not None:
+        updates["hybrid_keyword_weight"] = args.keyword_weight
+    if args.rrf_k is not None:
+        updates["hybrid_rrf_k"] = args.rrf_k
+    if args.keyword_candidates is not None:
+        updates["retrieval_keyword_candidates"] = args.keyword_candidates
+    if not updates:
+        return settings
+    return Settings.model_validate({**settings.model_dump(), **updates})
+
+
 def run_command(args: argparse.Namespace, settings: Settings) -> int:
     """Execute the ``rag-engine evaluate`` subcommand."""
     try:
+        resolved_settings = _apply_overrides(settings, args)
         report = asyncio.run(
             run_evaluation(
                 dataset_path=args.dataset,
-                settings=settings,
+                settings=resolved_settings,
                 top_k=args.top_k,
                 min_score=args.min_score,
                 baseline_path=args.baseline,

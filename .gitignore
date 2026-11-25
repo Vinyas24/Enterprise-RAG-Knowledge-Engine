@@ -31,5 +31,7 @@ htmlcov/
 *.log
 tmp/
 
-# --- generated evaluation reports (committed baselines live in eval/baselines) ---
-eval/reports/
+# --- generated evaluation reports ------------------------------------------
+# Baselines and the per-phase report are committed; ad-hoc runs are not.
+eval/reports/*
+!eval/reports/hybrid_vs_dense.md

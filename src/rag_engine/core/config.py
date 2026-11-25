@@ -38,6 +38,13 @@ class LogFormat(StrEnum):
     CONSOLE = "console"
 
 
+class RetrievalMode(StrEnum):
+    """Which retrieval paths feed the result list."""
+
+    DENSE = "dense"
+    HYBRID = "hybrid"
+
+
 class Settings(BaseSettings):
     """Typed, validated, environment-driven configuration."""
 
@@ -121,6 +128,20 @@ class Settings(BaseSettings):
     # --- retrieval --------------------------------------------------------
     retrieval_top_k: int = Field(default=5, ge=1, le=50)
     retrieval_min_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    # "dense" keeps Phase 4 behaviour; "hybrid" fuses dense and BM25 keyword
+    # results. Hybrid is the default because keyword recall helps most on the
+    # exact identifiers and error strings enterprise corpora are full of.
+    retrieval_mode: RetrievalMode = RetrievalMode.HYBRID
+    # Reciprocal-rank-fusion weights. They are ranks, not scores, so the scale
+    # of a cosine similarity and a BM25 score never has to be reconciled.
+    hybrid_dense_weight: float = Field(default=1.0, ge=0.0, le=10.0)
+    hybrid_keyword_weight: float = Field(default=1.0, ge=0.0, le=10.0)
+    # 60 is the value from the original RRF paper and dampens rank differences
+    # without flattening the top of the list.
+    hybrid_rrf_k: int = Field(default=60, ge=1, le=1000)
+    # PostgreSQL selects this many keyword candidates before BM25 scoring.
+    # Bounded so one very common term cannot make a query scan every chunk.
+    retrieval_keyword_candidates: int = Field(default=200, ge=1, le=1000)
 
     # --- generation / LLM -------------------------------------------------
     # "deterministic" for local/tests without external API keys; "openai" for production.
@@ -156,6 +177,17 @@ class Settings(BaseSettings):
     def _validate_chunking(self) -> Settings:
         if self.chunk_overlap_chars >= self.chunk_size_chars:
             raise ValueError("chunk_overlap_chars must be smaller than chunk_size_chars")
+        return self
+
+    @model_validator(mode="after")
+    def _validate_hybrid_weights(self) -> Settings:
+        """Reject a fusion configuration where every path contributes nothing.
+
+        Checked regardless of ``retrieval_mode`` so flipping the mode later
+        cannot surface a configuration that silently returns no results.
+        """
+        if self.hybrid_dense_weight == 0.0 and self.hybrid_keyword_weight == 0.0:
+            raise ValueError("hybrid_dense_weight and hybrid_keyword_weight cannot both be zero")
         return self
 
     @model_validator(mode="after")

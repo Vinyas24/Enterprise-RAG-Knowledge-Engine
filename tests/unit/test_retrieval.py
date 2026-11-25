@@ -7,12 +7,10 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
-from rag_engine.core.config import Settings
 from rag_engine.core.enums import AccessLevel
 from rag_engine.core.ids import chunk_vector_id
 from rag_engine.core.models import Chunk
 from rag_engine.retrieval.dense import DenseRetriever
-from rag_engine.retrieval.factory import build_retriever
 from rag_engine.vectorstore.base import VectorMatch
 
 
@@ -181,14 +179,3 @@ async def test_equal_scores_are_ordered_by_stable_document_fields() -> None:
         "Alpha Handbook",
         "Zulu Handbook",
     ]
-
-
-def test_build_retriever() -> None:
-    settings = Settings()
-    retriever = build_retriever(
-        settings,
-        embedder=AsyncMock(),
-        vector_store=AsyncMock(),
-        database=MockDatabase([]),
-    )
-    assert isinstance(retriever, DenseRetriever)

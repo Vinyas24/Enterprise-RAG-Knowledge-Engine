@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 
 _DESCRIPTION = (
     "Enterprise RAG knowledge engine: asynchronous document ingestion, hybrid "
-    "retrieval with access-control filters, re-ranking and grounded answers "
+    "retrieval with access-control filters, rank fusion and grounded answers "
     "with source citations."
 )
 
@@ -110,6 +110,7 @@ def create_app(
                 "blob_store_path": str(resolved.blob_store_path),
                 "embedding_provider": resolved.embedding_provider,
                 "vector_store": resolved.vector_store,
+                "retrieval_mode": resolved.retrieval_mode.value,
                 "llm_provider": resolved.llm_provider,
             },
         )

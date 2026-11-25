@@ -40,6 +40,12 @@ class EvaluationConfig(BaseModel):
     vector_store: str
     top_k: int
     min_score: float
+    # Hybrid-only settings. ``None`` on a dense-only run so a dense report is
+    # comparable with the Phase 5 baseline without a spurious config warning.
+    keyword_candidates: int | None = None
+    hybrid_dense_weight: float | None = None
+    hybrid_keyword_weight: float | None = None
+    hybrid_rrf_k: int | None = None
 
 
 class EvaluationReport(BaseModel):
@@ -118,8 +124,16 @@ def render_markdown(report: EvaluationReport) -> str:
         ),
         f"- Vector store: {report.config.vector_store}",
         f"- top_k: {k}, min_score: {report.config.min_score}",
-        "",
     ]
+    if report.config.hybrid_dense_weight is not None:
+        lines.append(
+            f"- Fusion: weighted reciprocal rank fusion "
+            f"(dense {report.config.hybrid_dense_weight}, "
+            f"keyword {report.config.hybrid_keyword_weight}, "
+            f"k={report.config.hybrid_rrf_k}); "
+            f"keyword candidates: {report.config.keyword_candidates}"
+        )
+    lines.append("")
 
     if report.warnings:
         lines.extend(["## Warnings", ""])
@@ -186,13 +200,20 @@ def render_markdown(report: EvaluationReport) -> str:
             "- **Irrelevant-context rate**: irrelevant retrieved chunks divided by all "
             "retrieved chunks, micro-averaged across questions. This is the share of "
             "context handed to the generator that the labels do not consider relevant.",
-            "- **Latency**: wall time around `Retriever.retrieve` only (query embedding, "
-            "vector search, PostgreSQL hydration and clearance filtering), measured after "
-            "one warm-up retrieval. It excludes ingestion, dataset loading, metric "
-            "calculation, report rendering and process startup. p50/p95 use the nearest-rank "
-            "method.",
+            "- **Latency**: wall time around `Retriever.retrieve` only — query embedding, "
+            "vector search, keyword candidate selection and BM25 scoring, PostgreSQL "
+            "hydration and clearance filtering, whichever of those the configured retriever "
+            "runs. Measured after one warm-up retrieval. It excludes ingestion, dataset "
+            "loading, metric calculation, report rendering and process startup. p50/p95 use "
+            "the nearest-rank method.",
             "",
-            "Dense-only baseline: no BM25 fusion and no re-ranker are applied.",
+            (
+                "Retrieval path: weighted reciprocal rank fusion of dense and BM25 keyword "
+                "results; no re-ranker is applied. Scores in `per_question` are fused RRF "
+                "scores, so they are not comparable with cosine similarities."
+                if report.config.hybrid_dense_weight is not None
+                else "Retrieval path: dense only — no BM25 fusion and no re-ranker are applied."
+            ),
             "",
         ]
     )
