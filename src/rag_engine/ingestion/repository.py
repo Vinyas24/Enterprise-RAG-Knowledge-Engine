@@ -72,10 +72,13 @@ async def list_documents(
     limit: int,
     offset: int,
     status: DocumentStatus | None = None,
+    access_level: AccessLevel | None = None,
 ) -> Sequence[Document]:
     statement = select(Document).where(Document.tenant_id == tenant_id)
     if status is not None:
         statement = statement.where(Document.status == status)
+    if access_level is not None:
+        statement = statement.where(Document.access_level == access_level)
     statement = (
         statement.order_by(Document.created_at.desc(), Document.id).limit(limit).offset(offset)
     )
@@ -83,11 +86,17 @@ async def list_documents(
 
 
 async def count_documents(
-    session: AsyncSession, *, tenant_id: UUID, status: DocumentStatus | None = None
+    session: AsyncSession,
+    *,
+    tenant_id: UUID,
+    status: DocumentStatus | None = None,
+    access_level: AccessLevel | None = None,
 ) -> int:
     statement = select(func.count()).select_from(Document).where(Document.tenant_id == tenant_id)
     if status is not None:
         statement = statement.where(Document.status == status)
+    if access_level is not None:
+        statement = statement.where(Document.access_level == access_level)
     return int((await session.execute(statement)).scalar_one())
 
 
@@ -192,6 +201,39 @@ async def get_job(session: AsyncSession, *, tenant_id: UUID, job_id: UUID) -> In
         IngestionJob.id == job_id, IngestionJob.tenant_id == tenant_id
     )
     return (await session.execute(statement)).scalar_one_or_none()
+
+
+async def list_jobs(
+    session: AsyncSession,
+    *,
+    tenant_id: UUID,
+    limit: int,
+    offset: int,
+    status: JobStatus | None = None,
+) -> Sequence[IngestionJob]:
+    statement = select(IngestionJob).where(IngestionJob.tenant_id == tenant_id)
+    if status is not None:
+        statement = statement.where(IngestionJob.status == status)
+    statement = (
+        statement.order_by(IngestionJob.created_at.desc(), IngestionJob.id)
+        .limit(limit)
+        .offset(offset)
+    )
+    return (await session.execute(statement)).scalars().all()
+
+
+async def count_jobs(
+    session: AsyncSession,
+    *,
+    tenant_id: UUID,
+    status: JobStatus | None = None,
+) -> int:
+    statement = (
+        select(func.count()).select_from(IngestionJob).where(IngestionJob.tenant_id == tenant_id)
+    )
+    if status is not None:
+        statement = statement.where(IngestionJob.status == status)
+    return int((await session.execute(statement)).scalar_one())
 
 
 async def latest_job_for_document(

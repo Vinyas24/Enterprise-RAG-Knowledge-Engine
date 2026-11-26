@@ -1,0 +1,11 @@
+ACME ROBOTICS INTERNAL ENGINEERING STANDARDS
+Classification: INTERNAL USE ONLY
+
+1. Source Control and Branching
+All engineers must branch from 'main' using the standard feature branch convention: 'feature/<ticket-id>-<short-description>'. Direct pushes to 'main' are strictly blocked by branch protection rules.
+
+2. Code Review and CI/CD Quality Gates
+Every Pull Request requires at least two approving reviews from code owners before merge. CI pipelines enforce 100% clean linting via Ruff, strict type checking via mypy, and a minimum of 90% branch test coverage. No PR may merge with failing tests.
+
+3. Database Migrations
+All database schema alterations must be authored as reversible Alembic migrations. Zero-downtime guidelines mandate that column additions must be nullable or carry non-locking server defaults. Dropping columns requires a three-stage deprecation cycle across two release milestones.

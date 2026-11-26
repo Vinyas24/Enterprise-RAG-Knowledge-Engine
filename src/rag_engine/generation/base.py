@@ -28,6 +28,8 @@ class GenerationResult:
     answer: str
     citations: list[Citation]
     weak_retrieval: bool
+    question: str | None = None
+    timings: dict[str, float] | None = None
 
 
 @runtime_checkable

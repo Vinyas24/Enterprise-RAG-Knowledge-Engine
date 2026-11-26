@@ -36,6 +36,7 @@ adding a token-count column that would have to be backfilled.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import math
 import re
@@ -145,11 +146,13 @@ class KeywordRetriever(Retriever):
         *,
         database: DatabaseProtocol,
         candidate_limit: int = 200,
+        timeout_seconds: float | None = None,
     ) -> None:
         if candidate_limit < 1:
             raise ValueError("candidate_limit must be at least 1")
         self._database = database
         self._candidate_limit = candidate_limit
+        self._timeout_seconds = timeout_seconds
 
     async def retrieve(
         self,
@@ -166,7 +169,31 @@ class KeywordRetriever(Retriever):
         a cosine-similarity floor and BM25 scores are on an unrelated scale.
         Thresholding them with it would silently discard every result.
         """
-        del min_score
+        if self._timeout_seconds is not None:
+            return await asyncio.wait_for(
+                self._retrieve_internal(
+                    tenant_id=tenant_id,
+                    query=query,
+                    top_k=top_k,
+                    clearance=clearance,
+                ),
+                timeout=self._timeout_seconds,
+            )
+        return await self._retrieve_internal(
+            tenant_id=tenant_id,
+            query=query,
+            top_k=top_k,
+            clearance=clearance,
+        )
+
+    async def _retrieve_internal(
+        self,
+        *,
+        tenant_id: UUID,
+        query: str,
+        top_k: int,
+        clearance: AccessLevel,
+    ) -> list[RetrievedChunk]:
         terms = list(dict.fromkeys(tokenize(query)))
         if not terms:
             return []

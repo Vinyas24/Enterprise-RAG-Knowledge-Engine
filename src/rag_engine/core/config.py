@@ -45,6 +45,17 @@ class RetrievalMode(StrEnum):
     HYBRID = "hybrid"
 
 
+class RerankProvider(StrEnum):
+    """How retrieved candidates are re-scored before the final cut."""
+
+    OFF = "off"
+    COHERE = "cohere"
+    CROSS_ENCODER = "cross-encoder"
+    # Deterministic BM25 over the merged pool. No model, no network: it exists
+    # so offline evaluation and local development exercise the re-ranking path.
+    LEXICAL = "lexical"
+
+
 class Settings(BaseSettings):
     """Typed, validated, environment-driven configuration."""
 
@@ -69,7 +80,9 @@ class Settings(BaseSettings):
     # --- database ---------------------------------------------------------
     database_url: str = "postgresql+asyncpg://rag:rag_dev_password@localhost:5432/rag"
     database_pool_size: int = Field(default=5, ge=1, le=50)
+    database_max_overflow: int = Field(default=10, ge=0, le=50)
     database_pool_timeout_seconds: float = Field(default=10.0, gt=0, le=120)
+    database_pool_recycle_seconds: int = Field(default=1800, ge=60, le=86400)
     database_connect_timeout_seconds: float = Field(default=5.0, gt=0, le=60)
     database_echo: bool = False
 
@@ -142,6 +155,30 @@ class Settings(BaseSettings):
     # PostgreSQL selects this many keyword candidates before BM25 scoring.
     # Bounded so one very common term cannot make a query scan every chunk.
     retrieval_keyword_candidates: int = Field(default=200, ge=1, le=1000)
+    # Resilience: graceful fallback if one of the hybrid paths fails or times out
+    hybrid_fallback_enabled: bool = True
+    dense_retrieval_timeout_seconds: float = Field(default=10.0, gt=0, le=60)
+    keyword_retrieval_timeout_seconds: float = Field(default=10.0, gt=0, le=60)
+
+    # --- re-ranking -------------------------------------------------------
+    # "off" keeps Phase 6 behaviour. A configured re-ranker scores the merged
+    # candidates and trims them to ``retrieval_top_k``.
+    rerank_provider: RerankProvider = RerankProvider.OFF
+    # Provider default applies when unset, because the same field carries a
+    # Cohere model id and a local sentence-transformers model path.
+    rerank_model: str | None = None
+    # The merged pool the re-ranker sees. Bounded so a single query cannot send
+    # an unbounded prompt to a hosted provider.
+    rerank_candidates: int = Field(default=20, ge=1, le=100)
+    # A deadline, not a retry budget: past it the caller gets the un-reranked
+    # order rather than a slow answer.
+    rerank_timeout_seconds: float = Field(default=5.0, gt=0, le=60)
+    rerank_api_key: SecretStr | None = None
+    rerank_api_base: str = "https://api.cohere.com/v2"
+    # Cross-encoder only: pairs per forward pass, and the device string the
+    # model is loaded on (unset lets sentence-transformers choose).
+    rerank_batch_size: int = Field(default=32, ge=1, le=256)
+    rerank_device: str | None = None
 
     # --- generation / LLM -------------------------------------------------
     # "deterministic" for local/tests without external API keys; "openai" for production.
@@ -152,6 +189,51 @@ class Settings(BaseSettings):
     llm_timeout_seconds: float = Field(default=30.0, gt=0, le=120)
     llm_temperature: float = Field(default=0.0, ge=0.0, le=2.0)
     llm_max_tokens: int = Field(default=1024, ge=1, le=8192)
+
+    # --- guardrails -------------------------------------------------------
+    guardrails_enabled: bool = True
+    guardrails_max_query_length: int = Field(default=2000, ge=1, le=10000)
+    guardrails_min_query_length: int = Field(default=1, ge=1, le=100)
+    guardrails_mask_pii: bool = True
+    guardrails_detect_prompt_injection: bool = True
+    guardrails_check_groundedness: bool = True
+    guardrails_min_groundedness_score: float = Field(default=0.6, ge=0.0, le=1.0)
+    guardrails_validate_citations: bool = True
+    guardrails_rate_limit_per_minute: int = Field(default=120, ge=1, le=10000)
+    guardrails_audit_log_enabled: bool = True
+
+    # --- caching (Phase 9) ------------------------------------------------
+    cache_enabled: bool = True
+    cache_embedding_enabled: bool = True
+    cache_embedding_max_size: int = Field(default=10000, ge=100, le=100000)
+    cache_embedding_ttl_seconds: float = Field(default=3600.0, gt=0, le=86400)
+    cache_retrieval_enabled: bool = True
+    cache_retrieval_max_size: int = Field(default=2000, ge=50, le=50000)
+    cache_retrieval_ttl_seconds: float = Field(default=300.0, gt=0, le=86400)
+
+    # --- observability & polish (Phase 10) ---------------------------------
+    auth_enabled: bool = False
+    api_key: str | None = None
+    admin_api_key: str | None = None
+    metrics_enabled: bool = True
+    server_timing_enabled: bool = True
+
+    @field_validator(
+        "rerank_api_key",
+        "rerank_model",
+        "rerank_device",
+        "api_key",
+        "admin_api_key",
+        mode="before",
+    )
+    @classmethod
+    def _blank_rerank_values_are_unset(cls, value: object) -> object:
+        """Treat ``RAG_X=`` from Compose as unset rather than an empty string.
+
+        ``device=""`` would otherwise be passed to the model loader, and an
+        empty secret would look configured to the key check.
+        """
+        return None if value == "" else value
 
     @field_validator("database_url")
     @classmethod
@@ -188,6 +270,13 @@ class Settings(BaseSettings):
         """
         if self.hybrid_dense_weight == 0.0 and self.hybrid_keyword_weight == 0.0:
             raise ValueError("hybrid_dense_weight and hybrid_keyword_weight cannot both be zero")
+        return self
+
+    @model_validator(mode="after")
+    def _validate_rerank_key(self) -> Settings:
+        """Require an API key when the hosted re-ranker is selected."""
+        if self.rerank_provider is RerankProvider.COHERE and not self.rerank_api_key:
+            raise ValueError("rerank_api_key is required when rerank_provider is 'cohere'")
         return self
 
     @model_validator(mode="after")

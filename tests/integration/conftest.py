@@ -45,7 +45,7 @@ DATABASE_URL = os.getenv("RAG_TEST_DATABASE_URL")
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
-_TABLES = "tenants, users, documents, chunks, ingestion_jobs"
+_TABLES = "tenants, users, documents, chunks, ingestion_jobs, audit_logs"
 
 
 @pytest.fixture(scope="session", autouse=True)

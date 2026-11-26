@@ -8,6 +8,7 @@ from pydantic import ValidationError
 from rag_engine.core.config import (
     Environment,
     LogFormat,
+    RerankProvider,
     RetrievalMode,
     Settings,
     get_settings,
@@ -183,3 +184,41 @@ def test_fusion_settings_are_bounded() -> None:
         Settings(hybrid_rrf_k=0, _env_file=None)
     with pytest.raises(ValidationError):
         Settings(retrieval_keyword_candidates=0, _env_file=None)
+
+
+def test_reranking_is_off_by_default() -> None:
+    settings = Settings(_env_file=None)
+
+    assert settings.rerank_provider is RerankProvider.OFF
+    assert settings.rerank_model is None
+    assert settings.rerank_candidates == 20
+    assert settings.rerank_timeout_seconds == 5.0
+    assert settings.rerank_api_key is None
+
+
+def test_cohere_reranking_requires_an_api_key() -> None:
+    with pytest.raises(ValidationError, match="rerank_api_key is required"):
+        Settings(rerank_provider="cohere", _env_file=None)
+
+
+def test_blank_rerank_values_from_compose_are_unset() -> None:
+    """Compose interpolates an unset variable to an empty string."""
+    settings = Settings(
+        rerank_model="",
+        rerank_device="",
+        rerank_api_key="",
+        _env_file=None,
+    )
+
+    assert settings.rerank_model is None
+    assert settings.rerank_device is None
+    assert settings.rerank_api_key is None
+
+
+def test_rerank_settings_are_bounded() -> None:
+    with pytest.raises(ValidationError):
+        Settings(rerank_candidates=0, _env_file=None)
+    with pytest.raises(ValidationError):
+        Settings(rerank_timeout_seconds=0, _env_file=None)
+    with pytest.raises(ValidationError):
+        Settings(rerank_batch_size=0, _env_file=None)

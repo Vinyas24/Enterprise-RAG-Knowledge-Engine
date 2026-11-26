@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from rag_engine.core.config import Settings
+from rag_engine.guardrails.service import GuardrailsService
 from rag_engine.retrieval.base import Retriever
 
 from .base import LLMProvider
@@ -34,10 +35,23 @@ def build_query_engine(
     *,
     retriever: Retriever,
     llm: LLMProvider,
+    guardrails: GuardrailsService | None = None,
+    wrap_cache: bool = True,
 ) -> QueryEngine:
     """Build the query engine coordinator."""
+    rtr = retriever
+    if wrap_cache and settings.cache_enabled and settings.cache_retrieval_enabled:
+        from rag_engine.cache.retrieval import CachedRetriever
+
+        if not isinstance(rtr, CachedRetriever):
+            rtr = CachedRetriever(
+                rtr,
+                max_size=settings.cache_retrieval_max_size,
+                ttl_seconds=settings.cache_retrieval_ttl_seconds,
+            )
     return QueryEngine(
-        retriever=retriever,
+        retriever=rtr,
         llm=llm,
         settings=settings,
+        guardrails=guardrails,
     )

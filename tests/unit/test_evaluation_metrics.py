@@ -147,6 +147,46 @@ def test_aggregate_metrics_empty_input_is_an_error() -> None:
         aggregate_metrics([], k=5)
 
 
+def test_aggregate_metrics_reports_rerank_latency_separately() -> None:
+    first = evaluate_question(
+        _question("alpha", question_id="q1"),
+        [_item("alpha")],
+        k=1,
+        latency_ms=30.0,
+        rerank_latency_ms=8.0,
+    )
+    second = evaluate_question(
+        _question("alpha", question_id="q2"),
+        [_item("alpha")],
+        k=1,
+        latency_ms=40.0,
+        rerank_latency_ms=12.0,
+        rerank_fallback=True,
+    )
+
+    metrics = aggregate_metrics([first, second], k=1)
+
+    assert metrics.rerank_latency_p50_ms == 8.0
+    assert metrics.rerank_latency_p95_ms == 12.0
+    assert metrics.rerank_latency_mean_ms == 10.0
+    # Re-rank latency is a share of the total, never an addition to it.
+    assert metrics.latency_mean_ms == 35.0
+
+
+def test_rerank_defaults_keep_pre_rerank_results_compatible() -> None:
+    result = evaluate_question(
+        _question("alpha"),
+        [_item("alpha")],
+        k=1,
+        latency_ms=10.0,
+    )
+
+    assert result.rerank_latency_ms == 0.0
+    assert result.rerank_fallback is False
+    metrics = aggregate_metrics([result], k=1)
+    assert metrics.rerank_latency_mean_ms == 0.0
+
+
 def test_compare_metrics_records_signed_deltas_and_directions() -> None:
     result = evaluate_question(
         _question("alpha"),

@@ -47,6 +47,11 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
             base_url=base_url.rstrip("/") + "/",
             timeout=timeout_seconds,
             headers={"Authorization": f"Bearer {api_key}"},
+            limits=httpx.Limits(
+                max_keepalive_connections=20,
+                max_connections=50,
+                keepalive_expiry=30.0,
+            ),
             transport=transport,
         )
 

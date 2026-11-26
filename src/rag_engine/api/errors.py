@@ -17,6 +17,7 @@ from typing import Any, cast
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from rag_engine.core.context import get_request_id
@@ -54,6 +55,36 @@ _INGESTION_ERRORS: dict[type[IngestionError], tuple[int, str]] = {
     DocumentTooLarge: (413, "file_too_large"),
     DuplicateDocument: (409, "duplicate_document"),
     ParseError: (422, "document_unparseable"),
+}
+
+
+class ErrorDetail(BaseModel):
+    """Structured machine- and human-readable error payload."""
+
+    code: str = Field(description="Machine-readable error code")
+    message: str = Field(description="Human-readable error explanation")
+    request_id: str | None = Field(default=None, description="Request correlation identifier")
+    details: dict[str, Any] | None = Field(default=None, description="Contextual error details")
+
+
+class ErrorResponse(BaseModel):
+    """Uniform error envelope for all non-2xx responses."""
+
+    error: ErrorDetail
+
+
+COMMON_ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
+    400: {"model": ErrorResponse, "description": "Bad Request"},
+    401: {"model": ErrorResponse, "description": "Unauthorized"},
+    403: {"model": ErrorResponse, "description": "Forbidden"},
+    404: {"model": ErrorResponse, "description": "Not Found"},
+    409: {"model": ErrorResponse, "description": "Conflict"},
+    413: {"model": ErrorResponse, "description": "Payload Too Large"},
+    415: {"model": ErrorResponse, "description": "Unsupported Media Type"},
+    422: {"model": ErrorResponse, "description": "Unprocessable Entity"},
+    429: {"model": ErrorResponse, "description": "Too Many Requests"},
+    500: {"model": ErrorResponse, "description": "Internal Server Error"},
+    503: {"model": ErrorResponse, "description": "Service Unavailable"},
 }
 
 

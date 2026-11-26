@@ -111,6 +111,20 @@ class QueryRequest(BaseModel):
     clearance: AccessLevel = AccessLevel.INTERNAL
 
 
+class QueryTimings(BaseModel):
+    """Stage latency breakdown in milliseconds."""
+
+    total_ms: float = Field(description="Total query pipeline latency (ms)")
+    retrieve_ms: float = Field(default=0.0, description="Retrieval stage latency (ms)")
+    dense_ms: float | None = Field(default=None, description="Dense search latency (ms)")
+    keyword_ms: float | None = Field(default=None, description="BM25 search latency (ms)")
+    fuse_ms: float | None = Field(default=None, description="Rank fusion latency (ms)")
+    rerank_ms: float | None = Field(default=None, description="Re-ranking pass latency (ms)")
+    generate_ms: float | None = Field(default=None, description="LLM generation latency (ms)")
+    guardrails_input_ms: float = Field(default=0.0, description="Input guardrails latency (ms)")
+    guardrails_output_ms: float = Field(default=0.0, description="Output guardrails latency (ms)")
+
+
 class QueryResponse(BaseModel):
     """Synthesized answer and source citations."""
 
@@ -118,6 +132,16 @@ class QueryResponse(BaseModel):
     answer: str
     citations: list[CitationRead]
     weak_retrieval: bool
+    timings: QueryTimings | None = Field(
+        default=None, description="Stage latency breakdown in milliseconds"
+    )
+
+
+class JobListResponse(BaseModel):
+    items: list[JobRead]
+    total: int
+    limit: int
+    offset: int
 
 
 def job_summary(job: IngestionJob) -> JobSummary:

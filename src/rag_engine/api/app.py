@@ -16,7 +16,8 @@ from fastapi import FastAPI
 from rag_engine import __version__
 from rag_engine.api.errors import install_exception_handlers
 from rag_engine.api.middleware import RequestContextMiddleware
-from rag_engine.api.routers import documents, health, jobs, meta, query
+from rag_engine.api.routers import documents, health, jobs, meta, metrics, query
+from rag_engine.api.v1 import router as v1_router
 from rag_engine.core.config import Settings, get_settings
 from rag_engine.core.db import DatabaseProtocol, PostgresDatabase
 from rag_engine.core.logging import configure_logging
@@ -27,9 +28,11 @@ from rag_engine.generation import (
     build_llm,
     build_query_engine,
 )
+from rag_engine.guardrails import AuditLogger, DatabaseAuditLogger, GuardrailsService
 from rag_engine.ingestion.blobstore import BlobStore, LocalBlobStore
 from rag_engine.ingestion.parsers import ParserRegistry
 from rag_engine.ingestion.service import IngestionService
+from rag_engine.ranking import RerankedRetriever, Reranker, build_reranker
 from rag_engine.retrieval import Retriever, build_retriever
 from rag_engine.vectorstore import VectorStore, build_vector_store
 
@@ -37,9 +40,37 @@ logger = logging.getLogger(__name__)
 
 _DESCRIPTION = (
     "Enterprise RAG knowledge engine: asynchronous document ingestion, hybrid "
-    "retrieval with access-control filters, rank fusion and grounded answers "
-    "with source citations."
+    "retrieval with rank fusion and re-ranking, access-control filters and "
+    "grounded answers with source citations."
 )
+
+
+_OPENAPI_TAGS = [
+    {
+        "name": "documents",
+        "description": "Document upload, status, chunk inspection, re-index, and delete.",
+    },
+    {
+        "name": "query",
+        "description": "Question answering with semantic retrieval and stage tracing.",
+    },
+    {
+        "name": "ingestion",
+        "description": "Asynchronous ingestion job tracking and status.",
+    },
+    {
+        "name": "observability",
+        "description": "Prometheus metrics and request execution telemetry.",
+    },
+    {
+        "name": "health",
+        "description": "Service liveness and database readiness probes.",
+    },
+    {
+        "name": "meta",
+        "description": "Service metadata and version discovery.",
+    },
+]
 
 
 def create_app(
@@ -52,6 +83,8 @@ def create_app(
     retriever: Retriever | None = None,
     llm: LLMProvider | None = None,
     query_engine: QueryEngine | None = None,
+    guardrails: GuardrailsService | None = None,
+    audit_logger: AuditLogger | None = None,
 ) -> FastAPI:
     """Build the API application.
 
@@ -69,6 +102,8 @@ def create_app(
         retriever: Injected retriever (used by tests).
         llm: Injected language model provider (used by tests).
         query_engine: Injected query coordinator (used by tests).
+        guardrails: Injected guardrails service (used by tests).
+        audit_logger: Injected audit logger (used by tests).
     """
     resolved = settings or get_settings()
     configure_logging(level=resolved.log_level, log_format=resolved.log_format.value)
@@ -78,17 +113,48 @@ def create_app(
         db = database if database is not None else PostgresDatabase(resolved)
         store = blob_store if blob_store is not None else LocalBlobStore(resolved.blob_store_path)
         vs = vector_store if vector_store is not None else build_vector_store(resolved)
-        emb = embedder if embedder is not None else build_embedder(resolved)
-        rtr = (
-            retriever
-            if retriever is not None
-            else build_retriever(resolved, embedder=emb, vector_store=vs, database=db)
+        emb = embedder if embedder is not None else build_embedder(resolved, wrap_cache=True)
+        rtr: Retriever
+        reranker: Reranker | None = None
+        if retriever is not None:
+            # An injected retriever is a test seam; wrapping it would change
+            # what the test measures.
+            rtr = retriever
+        else:
+            base = build_retriever(resolved, embedder=emb, vector_store=vs, database=db)
+            reranker = build_reranker(resolved)
+            if reranker is None:
+                rtr = base
+            else:
+                # Fail startup, not every query, when a model or extra is
+                # missing. A misconfigured re-ranker should not hide behind the
+                # fallback path.
+                await reranker.warmup()
+                rtr = RerankedRetriever(
+                    base=base,
+                    reranker=reranker,
+                    candidate_pool=resolved.rerank_candidates,
+                    timeout_seconds=resolved.rerank_timeout_seconds,
+                )
+        al = (
+            audit_logger
+            if audit_logger is not None
+            else DatabaseAuditLogger(db)
+            if resolved.guardrails_audit_log_enabled
+            else None
+        )
+        gr = (
+            guardrails
+            if guardrails is not None
+            else GuardrailsService(settings=resolved, audit_logger=al)
+            if resolved.guardrails_enabled
+            else None
         )
         model = llm if llm is not None else build_llm(resolved)
         engine = (
             query_engine
             if query_engine is not None
-            else build_query_engine(resolved, retriever=rtr, llm=model)
+            else build_query_engine(resolved, retriever=rtr, llm=model, guardrails=gr)
         )
 
         app.state.db = db
@@ -97,6 +163,8 @@ def create_app(
         app.state.embedder = emb
         app.state.retriever = rtr
         app.state.llm = model
+        app.state.guardrails = gr
+        app.state.audit_logger = al
         app.state.query_engine = engine
         app.state.ingestion_service = IngestionService(
             parsers=ParserRegistry.default(), blob_store=store, settings=resolved
@@ -111,12 +179,16 @@ def create_app(
                 "embedding_provider": resolved.embedding_provider,
                 "vector_store": resolved.vector_store,
                 "retrieval_mode": resolved.retrieval_mode.value,
+                "rerank_provider": resolved.rerank_provider.value,
                 "llm_provider": resolved.llm_provider,
+                "guardrails_enabled": resolved.guardrails_enabled,
             },
         )
         try:
             yield
         finally:
+            if reranker is not None:
+                await reranker.close()
             await model.close()
             await emb.close()
             await vs.close()
@@ -131,14 +203,20 @@ def create_app(
         docs_url="/docs" if resolved.docs_enabled else None,
         redoc_url="/redoc" if resolved.docs_enabled else None,
         openapi_url="/openapi.json" if resolved.docs_enabled else None,
+        openapi_tags=_OPENAPI_TAGS,
     )
     app.state.settings = resolved
 
     app.add_middleware(RequestContextMiddleware)
     install_exception_handlers(app)
 
+    # Versioned API routes (/v1/...)
+    app.include_router(v1_router)
+
+    # Unversioned routes (backwards compatibility and core probes)
     app.include_router(health.router)
     app.include_router(meta.router)
+    app.include_router(metrics.router)
     app.include_router(documents.router)
     app.include_router(jobs.router)
     app.include_router(query.router)

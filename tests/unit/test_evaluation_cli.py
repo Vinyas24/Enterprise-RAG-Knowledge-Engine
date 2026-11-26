@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from rag_engine.core.config import RetrievalMode, Settings
+from rag_engine.core.config import RerankProvider, RetrievalMode, Settings
 from rag_engine.evaluation import cli as evaluation_cli
 from rag_engine.evaluation.cli import run_command
 from rag_engine.evaluation.report import EvaluationReport
@@ -72,6 +72,10 @@ def _args(dataset: Path) -> Namespace:
         keyword_weight=None,
         rrf_k=None,
         keyword_candidates=None,
+        reranker=None,
+        rerank_model=None,
+        rerank_candidates=None,
+        rerank_timeout=None,
         baseline=None,
         save_baseline=None,
         json_output=None,
@@ -170,3 +174,42 @@ def test_zero_fusion_weights_are_rejected_before_any_database_work(
 
     assert exit_code == 2
     assert "cannot both be zero" in capsys.readouterr().err
+
+
+def test_rerank_overrides_reach_the_harness(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    async def fake_run_evaluation(**kwargs: object) -> EvaluationReport:
+        captured.update(kwargs)
+        return _report()
+
+    monkeypatch.setattr(evaluation_cli, "run_evaluation", fake_run_evaluation)
+    args = _args(tmp_path / "dataset.json")
+    args.reranker = "cross-encoder"
+    args.rerank_model = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    args.rerank_candidates = 30
+    args.rerank_timeout = 2.5
+
+    assert run_command(args, Settings(_env_file=None)) == 0
+
+    settings = captured["settings"]
+    assert isinstance(settings, Settings)
+    assert settings.rerank_provider is RerankProvider.CROSS_ENCODER
+    assert settings.rerank_model == "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    assert settings.rerank_candidates == 30
+    assert settings.rerank_timeout_seconds == 2.5
+
+
+def test_rerank_override_without_a_cohere_key_fails_cleanly(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    args = _args(tmp_path / "dataset.json")
+    args.reranker = "cohere"
+
+    exit_code = run_command(args, Settings(_env_file=None))
+
+    assert exit_code == 2
+    assert "rerank_api_key is required" in capsys.readouterr().err

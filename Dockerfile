@@ -35,6 +35,7 @@ COPY pyproject.toml README.md ./
 COPY src ./src
 COPY alembic.ini ./
 COPY alembic ./alembic
+COPY eval ./eval
 
 RUN pip install -e ".[dev]"
 
@@ -62,6 +63,7 @@ COPY pyproject.toml README.md ./
 COPY src ./src
 COPY alembic.ini ./
 COPY alembic ./alembic
+COPY eval ./eval
 
 RUN pip install . && rm -rf /app/src
 

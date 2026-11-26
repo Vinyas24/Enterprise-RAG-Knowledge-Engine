@@ -32,7 +32,16 @@ from rag_engine.ingestion.chunking import build_chunker
 from rag_engine.ingestion.hashing import hash_content
 from rag_engine.ingestion.parsers import ParserRegistry
 from rag_engine.ingestion.vectorize import build_vector_records
+from rag_engine.ranking import (
+    RerankAttempt,
+    RerankedRetriever,
+    Reranker,
+    RerankError,
+    build_reranker,
+    resolve_rerank_model,
+)
 from rag_engine.retrieval import build_retriever
+from rag_engine.retrieval.base import Retriever
 from rag_engine.vectorstore import VectorStore
 
 from .dataset import EvalDataset, EvalQuestion, dataset_fingerprint
@@ -69,11 +78,18 @@ async def evaluate_dataset(
         raise EvaluationError("top_k must be at least 1")
     resolved_min_score = settings.retrieval_min_score if min_score is None else min_score
 
-    tenant = await _create_eval_tenant(database, dataset.name)
-    namespace = str(tenant.id)
+    reranker = build_reranker(settings)
     cleanup_warnings: list[str] = []
+    tenant: Tenant | None = None
 
     try:
+        if reranker is not None:
+            try:
+                await reranker.warmup()
+            except RerankError as exc:
+                raise EvaluationError(f"re-ranker unavailable: {exc}") from exc
+
+        tenant = await _create_eval_tenant(database, dataset.name)
         document_ids, chunk_count = await _index_corpus(
             dataset,
             tenant=tenant,
@@ -93,15 +109,20 @@ async def evaluate_dataset(
             key_by_id=key_by_id,
             top_k=resolved_k,
             min_score=resolved_min_score,
+            reranker=reranker,
         )
     finally:
-        cleanup_warnings = await _cleanup(
-            database, vector_store, tenant=tenant, namespace=namespace
-        )
+        if tenant is not None:
+            cleanup_warnings = await _cleanup(
+                database, vector_store, tenant=tenant, namespace=str(tenant.id)
+            )
+        if reranker is not None:
+            await reranker.close()
 
     metrics = aggregate_metrics(results, k=resolved_k)
     fingerprint = dataset_fingerprint(dataset)
     hybrid = settings.retrieval_mode is RetrievalMode.HYBRID
+    reranking = reranker is not None
     config = EvaluationConfig(
         retriever=settings.retrieval_mode.value,
         embedding_provider=settings.embedding_provider,
@@ -115,6 +136,10 @@ async def evaluate_dataset(
         hybrid_dense_weight=settings.hybrid_dense_weight if hybrid else None,
         hybrid_keyword_weight=settings.hybrid_keyword_weight if hybrid else None,
         hybrid_rrf_k=settings.hybrid_rrf_k if hybrid else None,
+        reranker=settings.rerank_provider.value,
+        rerank_model=resolve_rerank_model(settings),
+        rerank_candidates=settings.rerank_candidates if reranking else None,
+        rerank_timeout_seconds=settings.rerank_timeout_seconds if reranking else None,
     )
     warnings = list(cleanup_warnings)
     if not 30 <= len(dataset.questions) <= 50:
@@ -235,10 +260,25 @@ async def _run_questions(
     key_by_id: dict[UUID, str],
     top_k: int,
     min_score: float,
+    reranker: Reranker | None,
 ) -> list[QuestionResult]:
-    retriever = build_retriever(
-        settings, embedder=embedder, vector_store=vector_store, database=database
+    base = build_retriever(
+        settings,
+        embedder=embedder,
+        vector_store=vector_store,
+        database=database,
+        wrap_cache=False,
     )
+    attempts: list[RerankAttempt] = []
+    retriever: Retriever = base
+    if reranker is not None:
+        retriever = RerankedRetriever(
+            base=base,
+            reranker=reranker,
+            candidate_pool=settings.rerank_candidates,
+            timeout_seconds=settings.rerank_timeout_seconds,
+            observer=attempts.append,
+        )
     # One untimed call warms the embedding path and the connection pool so the
     # first question is not charged for process-level setup.
     await retriever.retrieve(
@@ -251,6 +291,7 @@ async def _run_questions(
 
     results: list[QuestionResult] = []
     for question in questions:
+        attempts.clear()
         started = time.perf_counter()
         chunks = await retriever.retrieve(
             tenant_id=tenant.id,
@@ -260,6 +301,8 @@ async def _run_questions(
             min_score=min_score,
         )
         elapsed_ms = (time.perf_counter() - started) * 1000.0
+        rerank_ms = sum(attempt.latency_ms for attempt in attempts)
+        rerank_fallback = any(attempt.used_fallback for attempt in attempts)
 
         retrieved: list[RetrievedItem] = []
         for chunk in chunks:
@@ -275,7 +318,16 @@ async def _run_questions(
                     score=chunk.score,
                 )
             )
-        results.append(evaluate_question(question, retrieved, k=top_k, latency_ms=elapsed_ms))
+        results.append(
+            evaluate_question(
+                question,
+                retrieved,
+                k=top_k,
+                latency_ms=elapsed_ms,
+                rerank_latency_ms=rerank_ms,
+                rerank_fallback=rerank_fallback,
+            )
+        )
     return results
 
 
@@ -334,7 +386,8 @@ def _baseline_warnings(
     changed = [
         name
         for name in type(config).model_fields
-        if name != "retriever" and getattr(config, name) != getattr(baseline.config, name)
+        if name not in _baseline_ignored_fields(baseline.config, config)
+        and getattr(config, name) != getattr(baseline.config, name)
     ]
     if changed:
         warnings.append("baseline configuration differs: " + ", ".join(sorted(changed)))
@@ -344,4 +397,23 @@ def _baseline_warnings(
             f"{config.retriever!r}; the delta is the effect of that change, not a "
             "like-for-like comparison"
         )
+    if baseline.config.reranker != config.reranker:
+        warnings.append(
+            f"baseline used reranker {baseline.config.reranker!r} and this run used "
+            f"{config.reranker!r}; the delta is the effect of re-ranking, not a "
+            "like-for-like comparison"
+        )
     return warnings
+
+
+def _baseline_ignored_fields(baseline: EvaluationConfig, current: EvaluationConfig) -> set[str]:
+    """Fields described by a dedicated warning instead of the generic list.
+
+    When the re-ranker changes, its model and pool are consequences of that
+    change, so listing them separately would bury the one warning that matters.
+    Two runs with the same re-ranker still surface tuning differences.
+    """
+    ignored = {"retriever"}
+    if baseline.reranker != current.reranker:
+        ignored |= {"reranker", "rerank_model", "rerank_candidates", "rerank_timeout_seconds"}
+    return ignored

@@ -19,6 +19,7 @@ def build_retriever(
     embedder: Embedder,
     vector_store: VectorStore,
     database: DatabaseProtocol,
+    wrap_cache: bool = False,
 ) -> Retriever:
     """Build the retriever selected by ``retrieval_mode``.
 
@@ -29,17 +30,32 @@ def build_retriever(
         embedder=embedder,
         vector_store=vector_store,
         database=database,
+        timeout_seconds=settings.dense_retrieval_timeout_seconds,
     )
+    retriever: Retriever
     if settings.retrieval_mode is RetrievalMode.DENSE:
-        return dense
+        retriever = dense
+    else:
+        retriever = HybridRetriever(
+            dense=dense,
+            keyword=KeywordRetriever(
+                database=database,
+                candidate_limit=settings.retrieval_keyword_candidates,
+                timeout_seconds=settings.keyword_retrieval_timeout_seconds,
+            ),
+            dense_weight=settings.hybrid_dense_weight,
+            keyword_weight=settings.hybrid_keyword_weight,
+            rrf_k=settings.hybrid_rrf_k,
+            fallback_enabled=settings.hybrid_fallback_enabled,
+        )
 
-    return HybridRetriever(
-        dense=dense,
-        keyword=KeywordRetriever(
-            database=database,
-            candidate_limit=settings.retrieval_keyword_candidates,
-        ),
-        dense_weight=settings.hybrid_dense_weight,
-        keyword_weight=settings.hybrid_keyword_weight,
-        rrf_k=settings.hybrid_rrf_k,
-    )
+    if wrap_cache and settings.cache_enabled and settings.cache_retrieval_enabled:
+        from rag_engine.cache.retrieval import CachedRetriever
+
+        retriever = CachedRetriever(
+            retriever,
+            max_size=settings.cache_retrieval_max_size,
+            ttl_seconds=settings.cache_retrieval_ttl_seconds,
+        )
+
+    return retriever

@@ -16,7 +16,7 @@ from pathlib import Path
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
-from rag_engine.core.config import get_settings
+from rag_engine.core.config import Settings, get_settings
 from rag_engine.core.db import PostgresDatabase
 from rag_engine.core.logging import configure_logging
 from rag_engine.core.models import Tenant
@@ -55,6 +55,44 @@ async def _list_tenants() -> int:
             print(f"{tenant.slug}\t{tenant.name}\t{tenant.id}")
         return 0
     finally:
+        await database.dispose()
+
+
+async def _run_benchmark_command(args: argparse.Namespace, settings: Settings) -> int:
+    from rag_engine.embedding import build_embedder
+    from rag_engine.evaluation.dataset import load_dataset
+    from rag_engine.evaluation.load_test import (
+        render_load_test_markdown,
+        run_performance_suite,
+    )
+    from rag_engine.vectorstore import build_vector_store
+
+    dataset = load_dataset(args.dataset)
+    database = PostgresDatabase(settings)
+    vector_store = build_vector_store(settings)
+    embedder = build_embedder(settings)
+
+    try:
+        report = await run_performance_suite(
+            dataset,
+            settings=settings,
+            database=database,
+            vector_store=vector_store,
+            embedder=embedder,
+        )
+        rendered = render_load_test_markdown(report)
+        print(rendered)
+
+        if args.json_output:
+            args.json_output.parent.mkdir(parents=True, exist_ok=True)
+            args.json_output.write_text(report.model_dump_json(indent=2), encoding="utf-8")
+        if args.markdown_output:
+            args.markdown_output.parent.mkdir(parents=True, exist_ok=True)
+            args.markdown_output.write_text(rendered, encoding="utf-8")
+        return 0
+    finally:
+        await embedder.close()
+        await vector_store.close()
         await database.dispose()
 
 
@@ -109,6 +147,30 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="override how many PostgreSQL full-text candidates BM25 re-ranks",
     )
     evaluate.add_argument(
+        "--reranker",
+        choices=("off", "cohere", "cross-encoder", "lexical"),
+        default=None,
+        help="override the re-ranker (default: RAG_RERANK_PROVIDER)",
+    )
+    evaluate.add_argument(
+        "--rerank-model",
+        default=None,
+        help="override the re-ranker model id or local model path",
+    )
+    evaluate.add_argument(
+        "--rerank-candidates",
+        type=int,
+        default=None,
+        help="override the candidate pool handed to the re-ranker",
+    )
+    evaluate.add_argument(
+        "--rerank-timeout",
+        type=float,
+        default=None,
+        dest="rerank_timeout",
+        help="override the re-ranker deadline in seconds",
+    )
+    evaluate.add_argument(
         "--baseline",
         type=Path,
         default=None,
@@ -127,6 +189,22 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--markdown-output", type=Path, default=None, help="write the rendered report as Markdown"
     )
 
+    benchmark = subparsers.add_parser(
+        "benchmark", help="run retrieval performance and concurrency load tests"
+    )
+    benchmark.add_argument(
+        "--dataset",
+        type=Path,
+        default=Path("eval/datasets/enterprise_baseline.json"),
+        help="dataset manifest (default: %(default)s)",
+    )
+    benchmark.add_argument(
+        "--json-output", type=Path, default=None, help="write the full report as JSON"
+    )
+    benchmark.add_argument(
+        "--markdown-output", type=Path, default=None, help="write the rendered report as Markdown"
+    )
+
     args = parser.parse_args(argv)
     settings = get_settings()
     configure_logging(level=settings.log_level, log_format=settings.log_format.value)
@@ -135,6 +213,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return asyncio.run(_create_tenant(args.slug, args.name))
     if args.command == "evaluate":
         return run_evaluation_command(args, settings)
+    if args.command == "benchmark":
+        return asyncio.run(_run_benchmark_command(args, settings))
     return asyncio.run(_list_tenants())
 
 

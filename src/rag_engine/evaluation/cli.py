@@ -80,6 +80,14 @@ def _apply_overrides(settings: Settings, args: argparse.Namespace) -> Settings:
         updates["hybrid_rrf_k"] = args.rrf_k
     if args.keyword_candidates is not None:
         updates["retrieval_keyword_candidates"] = args.keyword_candidates
+    if args.reranker is not None:
+        updates["rerank_provider"] = args.reranker
+    if args.rerank_model is not None:
+        updates["rerank_model"] = args.rerank_model
+    if args.rerank_candidates is not None:
+        updates["rerank_candidates"] = args.rerank_candidates
+    if args.rerank_timeout is not None:
+        updates["rerank_timeout_seconds"] = args.rerank_timeout
     if not updates:
         return settings
     return Settings.model_validate({**settings.model_dump(), **updates})

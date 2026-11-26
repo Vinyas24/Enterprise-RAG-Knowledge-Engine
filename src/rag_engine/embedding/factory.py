@@ -39,17 +39,26 @@ _PROVIDERS: dict[str, Callable[[Settings], EmbeddingProvider]] = {
 }
 
 
-def build_embedder(settings: Settings) -> Embedder:
+def build_embedder(settings: Settings, *, wrap_cache: bool = False) -> Embedder:
     """Construct the batching embedder for the configured provider."""
     builder = _PROVIDERS.get(settings.embedding_provider)
     if builder is None:
         # Settings validates the literal; this only fires for a caller that
         # bypassed validation with ``model_copy(update=...)``.
         raise ValueError(f"unknown embedding provider: {settings.embedding_provider!r}")
-    return BatchedEmbedder(
+    embedder: Embedder = BatchedEmbedder(
         builder(settings),
         batch_size=settings.embedding_batch_size,
         max_retries=settings.embedding_max_retries,
         retry_base_seconds=settings.embedding_retry_base_seconds,
         retry_max_seconds=settings.embedding_retry_max_seconds,
     )
+    if wrap_cache and settings.cache_enabled and settings.cache_embedding_enabled:
+        from rag_engine.cache.embedding import CachedEmbedder
+
+        embedder = CachedEmbedder(
+            embedder,
+            max_size=settings.cache_embedding_max_size,
+            ttl_seconds=settings.cache_embedding_ttl_seconds,
+        )
+    return embedder

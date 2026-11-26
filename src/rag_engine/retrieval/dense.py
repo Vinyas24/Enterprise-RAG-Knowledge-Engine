@@ -7,6 +7,7 @@ and similarity thresholding.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from uuid import UUID
 
@@ -32,10 +33,12 @@ class DenseRetriever(Retriever):
         embedder: Embedder,
         vector_store: VectorStore,
         database: DatabaseProtocol,
+        timeout_seconds: float | None = None,
     ) -> None:
         self._embedder = embedder
         self._vector_store = vector_store
         self._database = database
+        self._timeout_seconds = timeout_seconds
 
     async def retrieve(
         self,
@@ -45,6 +48,34 @@ class DenseRetriever(Retriever):
         top_k: int = 5,
         clearance: AccessLevel = AccessLevel.INTERNAL,
         min_score: float = 0.0,
+    ) -> list[RetrievedChunk]:
+        if self._timeout_seconds is not None:
+            return await asyncio.wait_for(
+                self._retrieve_internal(
+                    tenant_id=tenant_id,
+                    query=query,
+                    top_k=top_k,
+                    clearance=clearance,
+                    min_score=min_score,
+                ),
+                timeout=self._timeout_seconds,
+            )
+        return await self._retrieve_internal(
+            tenant_id=tenant_id,
+            query=query,
+            top_k=top_k,
+            clearance=clearance,
+            min_score=min_score,
+        )
+
+    async def _retrieve_internal(
+        self,
+        *,
+        tenant_id: UUID,
+        query: str,
+        top_k: int,
+        clearance: AccessLevel,
+        min_score: float,
     ) -> list[RetrievedChunk]:
         clean_query = query.strip()
         if not clean_query:

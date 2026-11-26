@@ -19,7 +19,10 @@ from rag_engine.evaluation.report import (
 )
 
 
-def _report(*, baseline: bool = False, warning: str | None = None) -> EvaluationReport:
+def _report(
+    *, baseline: bool = False, warning: str | None = None, reranker: str = "off"
+) -> EvaluationReport:
+    reranking = reranker != "off"
     question = EvalQuestion(
         id="q1",
         question="How do I roll back?",
@@ -30,12 +33,15 @@ def _report(*, baseline: bool = False, warning: str | None = None) -> Evaluation
         [RetrievedItem(document_key="deployment-runbook", chunk_index=0, score=0.9)],
         k=5,
         latency_ms=10.0,
+        rerank_latency_ms=4.0 if reranking else 0.0,
     )
     miss = evaluate_question(
         question.model_copy(update={"id": "q2", "question": "Something unanswered"}),
         [RetrievedItem(document_key="noise", chunk_index=0, score=0.1)],
         k=5,
         latency_ms=30.0,
+        rerank_latency_ms=6.0 if reranking else 0.0,
+        rerank_fallback=reranking,
     )
     results = [hit, miss]
     metrics = aggregate_metrics(results, k=5)
@@ -47,6 +53,10 @@ def _report(*, baseline: bool = False, warning: str | None = None) -> Evaluation
         vector_store="memory",
         top_k=5,
         min_score=0.0,
+        reranker=reranker,
+        rerank_model="rerank-v3.5" if reranker == "cohere" else None,
+        rerank_candidates=20 if reranking else None,
+        rerank_timeout_seconds=5.0 if reranking else None,
     )
     return EvaluationReport(
         generated_at=datetime(2026, 1, 1, tzinfo=UTC),
@@ -108,3 +118,46 @@ def test_report_json_round_trips() -> None:
     restored = EvaluationReport.model_validate_json(report.model_dump_json())
 
     assert restored == report
+
+
+def test_markdown_hides_rerank_rows_when_reranking_is_disabled() -> None:
+    markdown = render_markdown(_report())
+
+    assert "| Re-rank latency" not in markdown
+    assert "Re-ranker:" not in markdown
+    assert "Re-rank fallbacks" not in markdown
+    assert "neither BM25 fusion nor a re-ranker is applied" in markdown
+
+
+def test_markdown_reports_rerank_cost_configuration_and_fallbacks() -> None:
+    markdown = render_markdown(_report(reranker="cohere"))
+
+    assert "Re-ranker: cohere (rerank-v3.5); 20 candidates → top 5, timeout 5s" in markdown
+    assert "| Re-rank latency p50 (ms) | 4.0000 |" in markdown
+    assert "| Re-rank latency p95 (ms) | 6.0000 |" in markdown
+    assert "Re-rank fallbacks: 1 of 2 questions" in markdown
+    assert "then cohere re-ranking" in markdown
+    assert "re-ranker relevance scores" in markdown
+
+
+def test_rerank_defaults_do_not_break_an_old_baseline() -> None:
+    """A Phase 5/6 JSON has no rerank fields; it must still load and compare."""
+    legacy = _report().model_dump(mode="json")
+    for field in (
+        "reranker",
+        "rerank_model",
+        "rerank_candidates",
+        "rerank_timeout_seconds",
+    ):
+        legacy["config"].pop(field)
+    for result in legacy["per_question"]:
+        result.pop("rerank_latency_ms")
+        result.pop("rerank_fallback")
+    legacy["metrics"].pop("rerank_latency_p50_ms")
+    legacy["metrics"].pop("rerank_latency_p95_ms")
+    legacy["metrics"].pop("rerank_latency_mean_ms")
+
+    restored = EvaluationReport.model_validate(legacy)
+
+    assert restored.config.reranker == "off"
+    assert restored.metrics.rerank_latency_mean_ms == 0.0

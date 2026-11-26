@@ -13,6 +13,7 @@ from rag_engine.evaluation import harness
 from rag_engine.evaluation.dataset import EvalDataset
 from rag_engine.evaluation.harness import EvaluationError, evaluate_dataset
 from rag_engine.evaluation.report import render_markdown
+from rag_engine.ranking import RerankTransientError, RerankUnavailableError
 
 pytestmark = pytest.mark.integration
 
@@ -261,3 +262,124 @@ async def test_hybrid_report_records_fusion_and_compares_with_dense(
     assert "Fusion: weighted reciprocal rank fusion" in markdown
     assert "keyword candidates: 200" in markdown
     assert "| Baseline |" in markdown
+
+
+async def test_lexical_rerank_records_cost_separately_from_hybrid(
+    test_settings: Any,
+    database: Any,
+    vector_store: Any,
+    embedder: Any,
+) -> None:
+    dataset = _dataset()
+    hybrid = await evaluate_dataset(
+        dataset,
+        settings=_variant(test_settings, retrieval_mode="hybrid"),
+        database=database,
+        vector_store=vector_store,
+        embedder=embedder,
+        top_k=2,
+    )
+    reranked = await evaluate_dataset(
+        dataset,
+        settings=_variant(
+            test_settings,
+            retrieval_mode="hybrid",
+            rerank_provider="lexical",
+            rerank_candidates=20,
+            rerank_timeout_seconds=5.0,
+        ),
+        database=database,
+        vector_store=vector_store,
+        embedder=embedder,
+        top_k=2,
+        baseline=hybrid,
+    )
+
+    assert reranked.config.reranker == "lexical"
+    assert reranked.config.rerank_model is None
+    assert reranked.config.rerank_candidates == 20
+    assert reranked.config.rerank_timeout_seconds == 5.0
+
+    # Cost is measured, not inferred: every question runs the second pass.
+    assert all(result.rerank_latency_ms > 0.0 for result in reranked.per_question)
+    assert all(result.rerank_fallback is False for result in reranked.per_question)
+    assert 0.0 < reranked.metrics.rerank_latency_mean_ms < reranked.metrics.latency_mean_ms
+
+    # The comparison is deliberately across rerankers: the re-ranker fields are
+    # explained by one dedicated warning rather than a generic field list.
+    assert any("baseline used reranker 'off'" in warning for warning in reranked.warnings)
+    assert reranked.metrics.hit_rate == 1.0
+
+    markdown = render_markdown(reranked)
+    assert "- Re-ranker: lexical;" in markdown
+    assert "Re-rank fallbacks: 0 of 3 questions" in markdown
+
+
+async def test_rerank_failures_fall_back_and_are_reported(
+    test_settings: Any,
+    database: Any,
+    vector_store: Any,
+    embedder: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FailingReranker:
+        name = "failing"
+
+        async def warmup(self) -> None:
+            pass
+
+        async def rerank(self, **_kwargs: Any) -> list[Any]:
+            raise RerankTransientError("provider is down")
+
+        async def close(self) -> None:
+            pass
+
+    monkeypatch.setattr(harness, "build_reranker", lambda _settings: FailingReranker())
+
+    report = await evaluate_dataset(
+        _dataset(),
+        settings=_variant(test_settings, rerank_provider="lexical"),
+        database=database,
+        vector_store=vector_store,
+        embedder=embedder,
+        top_k=2,
+    )
+
+    # Fallback keeps the un-reranked order: quality is unchanged, and the
+    # report records that re-ranking did not actually happen.
+    assert report.metrics.hit_rate == 1.0
+    assert all(result.rerank_fallback for result in report.per_question)
+    assert all(result.rerank_latency_ms > 0.0 for result in report.per_question)
+    assert "Re-rank fallbacks: 3 of 3 questions" in render_markdown(report)
+
+
+async def test_a_reranker_that_cannot_warm_up_aborts_the_run(
+    test_settings: Any,
+    database: Any,
+    vector_store: Any,
+    embedder: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class Unavailable:
+        name = "unavailable"
+
+        async def warmup(self) -> None:
+            raise RerankUnavailableError("missing extra")
+
+        async def rerank(self, **_kwargs: Any) -> list[Any]:
+            raise AssertionError("should not be called")
+
+        async def close(self) -> None:
+            pass
+
+    monkeypatch.setattr(harness, "build_reranker", lambda _settings: Unavailable())
+
+    with pytest.raises(EvaluationError, match="re-ranker unavailable: missing extra"):
+        await evaluate_dataset(
+            _dataset(),
+            settings=_variant(test_settings, rerank_provider="lexical"),
+            database=database,
+            vector_store=vector_store,
+            embedder=embedder,
+            top_k=2,
+        )

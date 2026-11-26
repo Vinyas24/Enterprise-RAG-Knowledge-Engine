@@ -32,6 +32,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Local neural re-ranking. Kept optional because it pulls torch and downloads
+# a model; the default install uses Cohere or the deterministic provider.
+rerank = ["sentence-transformers>=3.0,<6.0"]
 # Dev tooling is pinned exactly: lint/format/type-check output is a build
 # artifact, and a formatter upgrade must never turn a green branch red.
 # Runtime dependencies use tested ranges until a lockfile is introduced.
@@ -112,7 +115,12 @@ show_error_codes = true
 plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
-module = ["pinecone", "pinecone.*"]
+module = [
+    "pinecone",
+    "pinecone.*",
+    "sentence_transformers",
+    "sentence_transformers.*",
+]
 ignore_missing_imports = true
 
 # --------------------------------------------------------------------------

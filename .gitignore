@@ -35,3 +35,5 @@ tmp/
 # Baselines and the per-phase report are committed; ad-hoc runs are not.
 eval/reports/*
 !eval/reports/hybrid_vs_dense.md
+!eval/reports/rerank_vs_hybrid.md
+!eval/reports/rerank_vs_hybrid.json

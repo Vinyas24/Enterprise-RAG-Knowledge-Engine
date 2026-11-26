@@ -18,6 +18,9 @@ class ServiceInfo(BaseModel):
     environment: str
     docs_url: str | None
     health: dict[str, str]
+    api_versions: list[str] = ["v1"]
+    current_version: str = "v1"
+    metrics_url: str = "/metrics"
 
 
 @router.get("/", response_model=ServiceInfo, summary="Service metadata")
@@ -28,4 +31,7 @@ async def service_info(settings: Settings = Depends(get_app_settings)) -> Servic
         environment=settings.environment.value,
         docs_url="/docs" if settings.docs_enabled else None,
         health={"liveness": "/health/live", "readiness": "/health/ready"},
+        api_versions=["v1"],
+        current_version="v1",
+        metrics_url="/metrics",
     )

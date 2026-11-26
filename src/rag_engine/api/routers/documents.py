@@ -6,10 +6,11 @@ import logging
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Form, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from rag_engine.api.auth import require_api_key
 from rag_engine.api.deps import (
     get_app_settings,
     get_ingestion_service,
@@ -17,7 +18,7 @@ from rag_engine.api.deps import (
     get_tenant,
     get_vector_store,
 )
-from rag_engine.api.errors import ApiError
+from rag_engine.api.errors import COMMON_ERROR_RESPONSES, ApiError
 from rag_engine.api.schemas import (
     ChunkListResponse,
     DocumentAccepted,
@@ -39,7 +40,12 @@ from rag_engine.vectorstore.maintenance import delete_document_vectors
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/documents", tags=["documents"])
+router = APIRouter(
+    prefix="/documents",
+    tags=["documents"],
+    dependencies=[Depends(require_api_key)],
+    responses=COMMON_ERROR_RESPONSES,
+)
 
 
 @router.post(
@@ -92,9 +98,14 @@ async def upload_document(
 async def list_documents(
     tenant: Annotated[Tenant, Depends(get_tenant)],
     session: Annotated[AsyncSession, Depends(get_session)],
-    limit: Annotated[int, Query(ge=1, le=100)] = 20,
-    offset: Annotated[int, Query(ge=0)] = 0,
-    status_filter: Annotated[DocumentStatus | None, Query(alias="status")] = None,
+    limit: Annotated[int, Query(ge=1, le=100, description="Page size")] = 20,
+    offset: Annotated[int, Query(ge=0, description="Items to skip")] = 0,
+    status_filter: Annotated[
+        DocumentStatus | None, Query(alias="status", description="Filter by status")
+    ] = None,
+    access_level_filter: Annotated[
+        AccessLevel | None, Query(alias="access_level", description="Filter by clearance")
+    ] = None,
 ) -> DocumentListResponse:
     documents = await repository.list_documents(
         session,
@@ -102,8 +113,14 @@ async def list_documents(
         limit=limit,
         offset=offset,
         status=status_filter,
+        access_level=access_level_filter,
     )
-    total = await repository.count_documents(session, tenant_id=tenant.id, status=status_filter)
+    total = await repository.count_documents(
+        session,
+        tenant_id=tenant.id,
+        status=status_filter,
+        access_level=access_level_filter,
+    )
     return DocumentListResponse(
         items=[document_summary(document) for document in documents],
         total=total,
@@ -230,6 +247,7 @@ async def reindex_document(
 )
 async def delete_document(
     document_id: UUID,
+    request: Request,
     tenant: Annotated[Tenant, Depends(get_tenant)],
     session: Annotated[AsyncSession, Depends(get_session)],
     vector_store: Annotated[VectorStore, Depends(get_vector_store)],
@@ -282,6 +300,11 @@ async def delete_document(
             "document has an active ingestion job; retry after it finishes",
         )
     await session.commit()
+
+    if hasattr(request.app.state, "retriever"):
+        rtr = request.app.state.retriever
+        if hasattr(rtr, "invalidate_tenant"):
+            rtr.invalidate_tenant(tenant.id)
 
     logger.info("document.deleted", extra={"document_id": str(document.id)})
     return JSONResponse(status_code=status.HTTP_204_NO_CONTENT, content=None)

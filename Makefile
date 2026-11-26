@@ -54,3 +54,6 @@ migrate: ## Apply database migrations (uses RAG_DATABASE_URL)
 	$(PYTHON) -m alembic upgrade head
 
 check: lint typecheck test ## Everything CI runs (except the Docker build)
+
+demo: ## Run the interactive scripted demo
+	./scripts/demo.sh

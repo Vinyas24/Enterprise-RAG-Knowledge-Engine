@@ -9,10 +9,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from collections.abc import Awaitable
 from uuid import UUID
 
 from rag_engine.core.enums import AccessLevel
+from rag_engine.observability import get_metrics_registry, trace_stage
 
 from .base import RetrievedChunk, Retriever
 from .fusion import DEFAULT_RRF_K, reciprocal_rank_fusion
@@ -37,6 +39,7 @@ class HybridRetriever(Retriever):
         dense_weight: float = 1.0,
         keyword_weight: float = 1.0,
         rrf_k: int = DEFAULT_RRF_K,
+        fallback_enabled: bool = False,
     ) -> None:
         if dense_weight == 0.0 and keyword_weight == 0.0:
             raise ValueError("at least one of dense_weight and keyword_weight must be non-zero")
@@ -49,6 +52,7 @@ class HybridRetriever(Retriever):
         self._dense_weight = dense_weight
         self._keyword_weight = keyword_weight
         self._rrf_k = rrf_k
+        self._fallback_enabled = fallback_enabled
 
     async def retrieve(
         self,
@@ -68,37 +72,97 @@ class HybridRetriever(Retriever):
             return []
 
         depth = max(top_k * _CANDIDATE_MULTIPLIER, _MIN_CANDIDATE_DEPTH)
+        path_names: list[str] = []
         weights: list[float] = []
         calls: list[Awaitable[list[RetrievedChunk]]] = []
+
+        async def _traced(name: str, coro: Awaitable[list[RetrievedChunk]]) -> list[RetrievedChunk]:
+            t0 = time.perf_counter()
+            with trace_stage(name):
+                res = await coro
+            dur = time.perf_counter() - t0
+            get_metrics_registry().record_timing(
+                "rag_pipeline_stage_duration_seconds", dur, labels={"stage": name}
+            )
+            return res
+
         if self._dense_weight > 0.0:
+            path_names.append("dense")
             weights.append(self._dense_weight)
             calls.append(
-                self._dense.retrieve(
-                    tenant_id=tenant_id,
-                    query=query,
-                    top_k=depth,
-                    clearance=clearance,
-                    min_score=min_score,
+                _traced(
+                    "dense",
+                    self._dense.retrieve(
+                        tenant_id=tenant_id,
+                        query=query,
+                        top_k=depth,
+                        clearance=clearance,
+                        min_score=min_score,
+                    ),
                 )
             )
         if self._keyword_weight > 0.0:
+            path_names.append("keyword")
             weights.append(self._keyword_weight)
             calls.append(
-                self._keyword.retrieve(
-                    tenant_id=tenant_id,
-                    query=query,
-                    top_k=depth,
-                    clearance=clearance,
+                _traced(
+                    "keyword",
+                    self._keyword.retrieve(
+                        tenant_id=tenant_id,
+                        query=query,
+                        top_k=depth,
+                        clearance=clearance,
+                    ),
                 )
             )
 
-        # ``gather`` propagates the first failure; a silent half-result would
-        # be worse than a failed query, because the caller cannot tell. The
-        # constructor guarantees at least one call, so ``calls`` is never empty.
-        rankings = await asyncio.gather(*calls)
-        return reciprocal_rank_fusion(
-            rankings=rankings,
-            weights=weights,
-            limit=top_k,
-            k=self._rrf_k,
-        )
+        def _fuse(rk: list[list[RetrievedChunk]], wt: list[float]) -> list[RetrievedChunk]:
+            t0 = time.perf_counter()
+            with trace_stage("fuse"):
+                out = reciprocal_rank_fusion(
+                    rankings=rk,
+                    weights=wt,
+                    limit=top_k,
+                    k=self._rrf_k,
+                )
+            dur = time.perf_counter() - t0
+            get_metrics_registry().record_timing(
+                "rag_pipeline_stage_duration_seconds", dur, labels={"stage": "fuse"}
+            )
+            return out
+
+        if not self._fallback_enabled:
+            rankings = await asyncio.gather(*calls)
+            return _fuse(rankings, weights)
+
+        # Graceful outage fallback: if one path times out or fails,
+        # log and continue with the surviving path
+        results = await asyncio.gather(*calls, return_exceptions=True)
+        valid_rankings: list[list[RetrievedChunk]] = []
+        valid_weights: list[float] = []
+        first_error: BaseException | None = None
+
+        for name, weight, result in zip(path_names, weights, results, strict=True):
+            if isinstance(result, BaseException):
+                logger.warning(
+                    "retrieval.hybrid_path_failed",
+                    extra={"path": name, "error": str(result)},
+                    exc_info=result,
+                )
+                if first_error is None:
+                    first_error = result
+            else:
+                valid_rankings.append(result)
+                valid_weights.append(weight)
+
+        if not valid_rankings:
+            # Both paths failed: re-raise the error so the caller is aware
+            if first_error is not None:
+                raise first_error
+            return []
+
+        if len(valid_rankings) == 1:
+            # Graceful single-path fallback: return top_k directly from surviving path
+            return valid_rankings[0][:top_k]
+
+        return _fuse(valid_rankings, valid_weights)

@@ -46,6 +46,10 @@ class QuestionResult(BaseModel):
     reciprocal_rank: float = Field(ge=0.0, le=1.0)
     irrelevant_context_rate: float = Field(ge=0.0, le=1.0)
     latency_ms: float = Field(ge=0.0)
+    # The re-rank share of ``latency_ms``. Zero when re-ranking is disabled, so
+    # a Phase 5/6 baseline JSON still parses and compares.
+    rerank_latency_ms: float = Field(default=0.0, ge=0.0)
+    rerank_fallback: bool = False
 
 
 class AggregateMetrics(BaseModel):
@@ -61,6 +65,11 @@ class AggregateMetrics(BaseModel):
     latency_p50_ms: float = Field(ge=0.0)
     latency_p95_ms: float = Field(ge=0.0)
     latency_mean_ms: float = Field(ge=0.0)
+    # Re-ranking cost, a subset of the totals above. Defaults keep old
+    # baselines loadable and render as a zero-cost baseline.
+    rerank_latency_p50_ms: float = Field(default=0.0, ge=0.0)
+    rerank_latency_p95_ms: float = Field(default=0.0, ge=0.0)
+    rerank_latency_mean_ms: float = Field(default=0.0, ge=0.0)
 
 
 class MetricComparison(BaseModel):
@@ -81,6 +90,9 @@ _LOWER_IS_BETTER = {
     "latency_p50_ms",
     "latency_p95_ms",
     "latency_mean_ms",
+    "rerank_latency_p50_ms",
+    "rerank_latency_p95_ms",
+    "rerank_latency_mean_ms",
 }
 
 
@@ -90,6 +102,8 @@ def evaluate_question(
     *,
     k: int,
     latency_ms: float,
+    rerank_latency_ms: float = 0.0,
+    rerank_fallback: bool = False,
 ) -> QuestionResult:
     """Score one question's top-k results.
 
@@ -123,6 +137,8 @@ def evaluate_question(
         reciprocal_rank=reciprocal_rank,
         irrelevant_context_rate=irrelevant_rate,
         latency_ms=latency_ms,
+        rerank_latency_ms=rerank_latency_ms,
+        rerank_fallback=rerank_fallback,
     )
 
 
@@ -148,6 +164,7 @@ def aggregate_metrics(results: Sequence[QuestionResult], *, k: int) -> Aggregate
 
     count = len(results)
     latencies = [result.latency_ms for result in results]
+    rerank_latencies = [result.rerank_latency_ms for result in results]
     retrieved_total = sum(len(result.retrieved[:k]) for result in results)
     relevant_total = sum(result.relevant_retrieved for result in results)
 
@@ -162,6 +179,9 @@ def aggregate_metrics(results: Sequence[QuestionResult], *, k: int) -> Aggregate
         latency_p50_ms=percentile(latencies, 50.0),
         latency_p95_ms=percentile(latencies, 95.0),
         latency_mean_ms=sum(latencies) / count,
+        rerank_latency_p50_ms=percentile(rerank_latencies, 50.0),
+        rerank_latency_p95_ms=percentile(rerank_latencies, 95.0),
+        rerank_latency_mean_ms=sum(rerank_latencies) / count,
     )
 
 

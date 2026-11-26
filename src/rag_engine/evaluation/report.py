@@ -46,6 +46,12 @@ class EvaluationConfig(BaseModel):
     hybrid_dense_weight: float | None = None
     hybrid_keyword_weight: float | None = None
     hybrid_rrf_k: int | None = None
+    # Phase 7. Defaults describe Phase 5/6 behaviour, so a saved dense or hybrid
+    # baseline still loads and compares without a reranker.
+    reranker: str = "off"
+    rerank_model: str | None = None
+    rerank_candidates: int | None = None
+    rerank_timeout_seconds: float | None = None
 
 
 class EvaluationReport(BaseModel):
@@ -72,6 +78,9 @@ _METRIC_LABELS = {
     "latency_p50_ms": "Latency p50 (ms)",
     "latency_p95_ms": "Latency p95 (ms)",
     "latency_mean_ms": "Latency mean (ms)",
+    "rerank_latency_p50_ms": "Re-rank latency p50 (ms)",
+    "rerank_latency_p95_ms": "Re-rank latency p95 (ms)",
+    "rerank_latency_mean_ms": "Re-rank latency mean (ms)",
 }
 
 _METRIC_DIRECTIONS = {
@@ -83,6 +92,9 @@ _METRIC_DIRECTIONS = {
     "latency_p50_ms": "lower is better",
     "latency_p95_ms": "lower is better",
     "latency_mean_ms": "lower is better",
+    "rerank_latency_p50_ms": "lower is better",
+    "rerank_latency_p95_ms": "lower is better",
+    "rerank_latency_mean_ms": "lower is better",
 }
 
 
@@ -133,6 +145,13 @@ def render_markdown(report: EvaluationReport) -> str:
             f"k={report.config.hybrid_rrf_k}); "
             f"keyword candidates: {report.config.keyword_candidates}"
         )
+    if report.config.reranker != "off":
+        model = f" ({report.config.rerank_model})" if report.config.rerank_model else ""
+        lines.append(
+            f"- Re-ranker: {report.config.reranker}{model}; "
+            f"{report.config.rerank_candidates} candidates → top {k}, "
+            f"timeout {report.config.rerank_timeout_seconds:g}s"
+        )
     lines.append("")
 
     if report.warnings:
@@ -149,6 +168,8 @@ def render_markdown(report: EvaluationReport) -> str:
         ]
     )
     for metric, label in _METRIC_LABELS.items():
+        if report.config.reranker == "off" and metric.startswith("rerank_"):
+            continue
         value = getattr(report.metrics, metric)
         comparison = comparisons.get(metric)
         baseline = _format_value(metric, comparison.baseline) if comparison is not None else "—"
@@ -158,6 +179,14 @@ def render_markdown(report: EvaluationReport) -> str:
             f"{_METRIC_DIRECTIONS[metric]} |"
         )
     lines.append("")
+
+    if report.config.reranker != "off":
+        fallbacks = sum(1 for result in report.per_question if result.rerank_fallback)
+        lines.append(
+            f"Re-rank fallbacks: {fallbacks} of {len(report.per_question)} questions returned "
+            "the un-reranked order."
+        )
+        lines.append("")
 
     misses = [
         result
@@ -202,19 +231,40 @@ def render_markdown(report: EvaluationReport) -> str:
             "context handed to the generator that the labels do not consider relevant.",
             "- **Latency**: wall time around `Retriever.retrieve` only — query embedding, "
             "vector search, keyword candidate selection and BM25 scoring, PostgreSQL "
-            "hydration and clearance filtering, whichever of those the configured retriever "
-            "runs. Measured after one warm-up retrieval. It excludes ingestion, dataset "
-            "loading, metric calculation, report rendering and process startup. p50/p95 use "
-            "the nearest-rank method.",
+            "hydration, clearance filtering and re-ranking when enabled, whichever of those "
+            "the configured stack runs. Measured after one warm-up retrieval. It excludes "
+            "ingestion, dataset loading, metric calculation, report rendering and process "
+            "startup. p50/p95 use the nearest-rank method.",
+            "- **Re-rank latency**: time spent inside the re-ranker, a subset of the total "
+            "latency above; zero when re-ranking is disabled. A timeout bills the full "
+            "deadline before the fallback returns the un-reranked order.",
             "",
-            (
-                "Retrieval path: weighted reciprocal rank fusion of dense and BM25 keyword "
-                "results; no re-ranker is applied. Scores in `per_question` are fused RRF "
-                "scores, so they are not comparable with cosine similarities."
-                if report.config.hybrid_dense_weight is not None
-                else "Retrieval path: dense only — no BM25 fusion and no re-ranker are applied."
-            ),
+            _retrieval_path(report),
             "",
         ]
     )
     return "\n".join(lines)
+
+
+def _retrieval_path(report: EvaluationReport) -> str:
+    """One sentence describing ordering and the score scale, honestly."""
+    fused = report.config.hybrid_dense_weight is not None
+    if report.config.reranker != "off":
+        upstream = (
+            "weighted reciprocal rank fusion of dense and BM25 keyword results"
+            if fused
+            else "dense search"
+        )
+        return (
+            f"Retrieval path: {upstream}, then {report.config.reranker} re-ranking of the "
+            "merged candidates down to top_k. Scores in `per_question` are re-ranker "
+            "relevance scores, so they are not comparable across providers or with cosine "
+            "similarities."
+        )
+    if fused:
+        return (
+            "Retrieval path: weighted reciprocal rank fusion of dense and BM25 keyword "
+            "results; no re-ranker is applied. Scores in `per_question` are fused RRF "
+            "scores, so they are not comparable with cosine similarities."
+        )
+    return "Retrieval path: dense only — neither BM25 fusion nor a re-ranker is applied."

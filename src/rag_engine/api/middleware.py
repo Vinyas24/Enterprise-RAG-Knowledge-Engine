@@ -29,6 +29,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from rag_engine.api.errors import error_payload
 from rag_engine.core.context import reset_request_id, set_request_id
+from rag_engine.observability import get_metrics_registry
 
 logger = logging.getLogger(__name__)
 
@@ -91,10 +92,22 @@ class RequestContextMiddleware:
                 except Exception:  # pragma: no cover - client gone mid-response
                     logger.debug("request.error_response_not_delivered", exc_info=True)
         finally:
-            duration_ms = round((time.perf_counter() - started) * 1000, 2)
+            duration_s = time.perf_counter() - started
+            duration_ms = round(duration_s * 1000, 2)
+            method = str(scope.get("method", ""))
+            path = str(scope.get("path", ""))
+            get_metrics_registry().increment_counter(
+                "rag_http_requests_total",
+                labels={"method": method, "path": path, "status": str(status_code)},
+            )
+            get_metrics_registry().record_timing(
+                "rag_http_request_duration_seconds",
+                duration_s,
+                labels={"method": method, "path": path},
+            )
             extra: dict[str, Any] = {
-                "method": scope.get("method"),
-                "path": scope.get("path"),
+                "method": method,
+                "path": path,
                 "status_code": status_code,
                 "duration_ms": duration_ms,
             }
